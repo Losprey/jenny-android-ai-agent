@@ -219,7 +219,9 @@ def test_port_is_not_part_of_the_security_boundary():
     [
         ("127.0.0.1", False, False, "loopback: entrambe bloccano"),
         ("169.254.169.254", False, False, "metadata: entrambe bloccano"),
-        ("100.100.1.1", False, False, "CGNAT: entrambe bloccano per default"),
+        ("100.100.1.1", False, True,
+         "CGNAT/Tailscale: url_target blocca (indirizzo scelto dal modello), "
+         "app_server ammette (baseUrl dichiarato nel manifest)"),
         ("10.0.0.5", False, True, "RFC1918: url_target blocca, app_server ammette"),
         ("192.168.50.1", False, True, "RFC1918: url_target blocca, app_server ammette"),
         ("172.20.0.9", False, True, "RFC1918: url_target blocca, app_server ammette"),
@@ -260,20 +262,26 @@ def test_ssh_policy_table(ip, ssh_ok, label):
         assert ok is ssh_ok, f"{label} — {err}"
 
 
-def test_ssh_allows_tailscale_without_opening_cgnat_to_the_model():
-    """Il motivo per cui il CGNAT e permesso *qui* e non nella ssrf_whitelist.
+def test_tailscale_allowed_where_the_user_names_the_target_never_where_the_model_does():
+    """Il criterio che separa le tre policy sul CGNAT, con whitelist vuota.
 
-    Il whitelist e globale: usarlo per Tailscale avrebbe aperto il CGNAT anche a
-    `web_fetch`, dove l'indirizzo lo sceglie il modello. Questo permesso invece
-    non esce dall'SSH.
+    Non e' "SSH si, il resto no": e' **chi sceglie l'indirizzo**. Un host SSH lo
+    digita l'utente in Settings; un `server.baseUrl` lo dichiara l'utente in un
+    manifest che puo' leggere. In entrambi i casi il CGNAT e' il modo normale di
+    raggiungere il proprio server da un telefono in 4G. In `web_fetch` invece
+    l'indirizzo lo sceglie il modello, e li' resta bloccato.
+
+    La whitelist globale resta vuota di proposito: e' esattamente la scorciatoia
+    che avrebbe aperto il CGNAT a tutte e tre insieme.
     """
+    configure_ssrf_whitelist([])
     with patch(
         "jenny.security.network.socket.getaddrinfo",
         _fake_resolve("ts.example", ["100.124.67.77"]),
     ):
-        assert validate_ssh_target("ts.example")[0]
-        assert not validate_url_target("http://ts.example/x")[0]
-        assert not validate_app_server_target("http://ts.example/x")[0]
+        assert validate_ssh_target("ts.example")[0], "host digitato dall'utente"
+        assert validate_app_server_target("http://ts.example/x")[0], "baseUrl dichiarato"
+        assert not validate_url_target("http://ts.example/x")[0], "target scelto dal modello"
 
 
 def test_ssrf_whitelist_applies_identically_to_both_policies():

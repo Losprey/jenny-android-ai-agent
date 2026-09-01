@@ -21,12 +21,17 @@ def build_apps_summary(workspace: Path) -> str:
                 f"Fix `apps/{app.slug}/app.json` if the user asks."
             )
             continue
-        tools = ", ".join(f"`{app.slug}_{a.name}`" for a in app.manifest.actions)
-        line = (
-            f"- **{app.manifest.name}** (`{app.slug}`) — {app.manifest.description} "
-            f"— tools: {tools} — data: `apps/{app.slug}/data/`"
-        )
+        # Composta a pezzi perche' le azioni sono opzionali: un'app di sola
+        # visualizzazione ne ha zero, e un `— tools: ` vuoto in mezzo alla riga
+        # sembrerebbe un elenco che non e' stato caricato.
+        parts = [f"- **{app.manifest.name}** (`{app.slug}`) — {app.manifest.description}"]
+        if app.manifest.actions:
+            tools = ", ".join(f"`{app.slug}_{a.name}`" for a in app.manifest.actions)
+            parts.append(f"tools: {tools}")
+        else:
+            parts.append("no agent-facing actions (display-only app)")
+        parts.append(f"data: `apps/{app.slug}/data/`")
         if (app.dir / "AGENT.md").is_file():
-            line += f" — context: `apps/{app.slug}/AGENT.md`"
-        lines.append(line)
+            parts.append(f"context: `apps/{app.slug}/AGENT.md`")
+        lines.append(" — ".join(parts))
     return "\n".join(lines)

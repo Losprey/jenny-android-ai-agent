@@ -886,12 +886,52 @@ class MainActivity : AppCompatActivity() {
                 if (isMain) {
                     mainFrameError = true
                     if (!loaded) scheduleRetry()
+                } else if (error != null) {
+                    reportSubframeError(view, request, error)
                 }
             }
         }
 
         Log.i(TAG, "Waiting for gateway on $GATEWAY_URL ...")
         wv.loadUrl(resolvedGatewayUrl)
+    }
+
+    /**
+     * Consegna alla SPA il fallimento di un sub-frame, che altrimenti non lo
+     * saprebbe mai.
+     *
+     * **Perché serve.** Un iframe che non carica non emette niente di
+     * osservabile dal JS della pagina che lo contiene: cross-origin, `onerror`
+     * non scatta e `contentDocument` è inaccessibile. Il risultato misurato è un
+     * riquadro bianco e zero informazione — per *qualunque* causa: 404, script
+     * rotto, o (il caso che ha portato qui) `ERR_CLEARTEXT_NOT_PERMITTED` su una
+     * Jenny App che incorniciava un `http://` non-loopback. L'errore esisteva
+     * solo in logcat, che l'utente non legge e l'agente non può leggere: sei
+     * occorrenze in un'ora senza che niente arrivasse a nessuno.
+     *
+     * Il canale è lo stesso già usato per `jenny-gesture-insets`
+     * (v. refreshGestureInsets): un CustomEvent sulla window della SPA. Il
+     * payload passa da [JSONObject] e non da concatenazione di stringhe —
+     * l'URL arriva dalla rete e finirebbe dentro codice JS valutato.
+     */
+    private fun reportSubframeError(
+        view: WebView?,
+        request: WebResourceRequest?,
+        error: WebResourceError
+    ) {
+        val wv = view ?: webView ?: return
+        if (!loaded) return  // la SPA non c'è ancora: non c'è nessuno in ascolto
+        val detail = JSONObject().apply {
+            put("url", request?.url?.toString() ?: "")
+            put("host", request?.url?.host ?: "")
+            put("description", error.description?.toString() ?: "")
+            put("errorCode", error.errorCode)
+        }
+        wv.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('jenny-subframe-error'," +
+                "{detail:$detail}))",
+            null
+        )
     }
 
     /**

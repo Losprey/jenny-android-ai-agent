@@ -102,6 +102,21 @@ class ToolCallRequest:
         return tool_call
 
 
+def describe_exc(exc: BaseException) -> str:
+    """Descrizione non vuota di un'eccezione, per i messaggi d'errore utente.
+
+    ``str(exc)`` e' vuoto per un'intera famiglia di eccezioni che qui arrivano
+    di continuo: tutti i timeout e gli errori di connessione di httpx
+    (``ReadTimeout``, ``ConnectTimeout``, ``ConnectError``,
+    ``RemoteProtocolError``) si costruiscono senza messaggio, e cosi' fa
+    ``StreamTimeout`` qui sopra. Interpolato in un f-string produceva
+    ``"Error calling LLM: "`` — cioe' l'utente vedeva un errore troncato ai due
+    punti, e nemmeno il log permetteva di risalire alla causa. Il nome della
+    classe e' l'unica informazione che resta, ed e' meglio del nulla.
+    """
+    return str(exc) or type(exc).__name__
+
+
 def parse_tool_arguments(arguments: Any) -> Any:
     """Parse provider tool arguments without guessing executable parameters.
 
@@ -347,7 +362,7 @@ class LLMProvider(ABC):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            return LLMResponse(content=f"Error calling LLM: {describe_exc(exc)}", finish_reason="error")
 
     async def chat_stream(
         self,
@@ -391,7 +406,7 @@ class LLMProvider(ABC):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return LLMResponse(content=f"Error calling LLM: {exc}", finish_reason="error")
+            return LLMResponse(content=f"Error calling LLM: {describe_exc(exc)}", finish_reason="error")
 
     async def chat_stream_with_retry(
         self,

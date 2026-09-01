@@ -44,6 +44,23 @@ class TestBuildAppsSummary:
         # Progressive disclosure: the content itself must never be inlined.
         assert "basilico" not in summary
 
+    def test_display_only_app_line_is_well_formed(self, tmp_path):
+        """Zero azioni non deve produrre un `— tools: ` vuoto in mezzo alla riga.
+
+        Un segmento vuoto si legge come un elenco che non è stato caricato, cioè
+        come un guasto, proprio nel contesto che l'agente usa per decidere se ha
+        un tool a disposizione.
+        """
+        _write_app(tmp_path, slug="vista", manifest={
+            "name": "Vista", "description": "Solo uno schermo",
+        })
+        summary = build_apps_summary(tmp_path)
+        assert "**Vista** (`vista`)" in summary
+        assert "tools: —" not in summary
+        assert "tools:  " not in summary
+        assert "display-only" in summary
+        assert "`apps/vista/data/`" in summary
+
     def test_broken_app_line(self, tmp_path):
         app_dir = tmp_path / "apps" / "rotta"
         app_dir.mkdir(parents=True)

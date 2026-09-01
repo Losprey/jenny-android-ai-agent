@@ -1,10 +1,16 @@
 """Jenny App manifest loading and validation.
 
 An app is a folder in ``<workspace>/apps/<slug>/`` with an ``app.json``
-manifest declaring typed actions (see ``.agent/jenny-apps.md`` and the
-``app-creator`` skill reference). Loading never raises: malformed apps come
+manifest optionally declaring typed actions (see ``.agent/jenny-apps.md`` and
+the ``app-creator`` skill reference). Loading never raises: malformed apps come
 back as ``LoadedApp(broken=True, error=...)`` so the grid can show them as
 broken without ever crashing the gateway.
+
+``actions`` is optional: an app whose only job is to draw a screen has nothing
+agent-facing to declare, and requiring a non-empty list made that app
+impossible to write — the observed result was an *invented* action added only to
+satisfy the schema. ``.agent/jenny-apps.md`` always described the agent-facing
+side as something an app "can" carry; the code disagreed until Sept 2026.
 """
 
 from __future__ import annotations
@@ -22,6 +28,12 @@ PLACEHOLDER_RE = re.compile(r"\{([^}]+)\}")
 STORAGE_OPS = {"append", "set", "update", "delete", "query"}
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 MAX_SLUG_LEN = 32
+# Kind ammessi per il blocco ``view``. "external" vuol dire: lo schermo dell'app
+# e' la UI del suo ``server.baseUrl``, servita attraverso il proxy su loopback
+# (``apps/proxy.py``) invece di ``app/index.html``. Esiste perche' la policy
+# cleartext dell'APK rifiuta un iframe verso un ``http://`` non-loopback, quindi
+# "incornicia il mio server" non era esprimibile in nessun modo.
+VIEW_KINDS = {"external"}
 
 
 @dataclass
@@ -47,6 +59,9 @@ class AppManifest:
     server_base_url: str | None = None
     server_auth: dict | None = None
     actions: list[AppAction] = field(default_factory=list)
+    # "external" quando lo schermo dell'app *e'* il suo server, non
+    # ``app/index.html``. None per un'app normale. V. VIEW_KINDS.
+    view_kind: str | None = None
 
 
 @dataclass
@@ -169,13 +184,23 @@ def _parse_manifest(data: object) -> AppManifest:
         base_url = server["baseUrl"]
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("app.json: server.baseUrl must start with http:// or https://")
-        auth = server.get("auth")
-        if auth is not None and isinstance(auth, dict):
-            server_auth = auth
+        if server.get("auth") is not None:
+            # Rifiutato in fase di caricamento, non solo di esecuzione. Il
+            # credential store non esiste (roadmap) e ``execute_http_action`` e'
+            # fail-closed, quindi un manifest con ``auth`` produceva un'app che
+            # passava la validazione, si apriva, e aveva *tutte* le azioni http
+            # morte con un 501 — visibile solo a chi tentava un'azione. Un
+            # contratto irrealizzabile e' un'app rotta, e va detto qui, dove
+            # l'errore finisce sotto gli occhi di chi ha scritto il manifest.
+            raise ValueError(
+                "app.json: server.auth is declared but app-server credentials are not "
+                "supported yet — remove the 'auth' block (every http action would be "
+                "refused with 501)"
+            )
 
-    raw_actions = data.get("actions")
-    if not isinstance(raw_actions, list) or not raw_actions:
-        raise ValueError("app.json: 'actions' must be a non-empty array")
+    raw_actions = data.get("actions") or []
+    if not isinstance(raw_actions, list):
+        raise ValueError("app.json: 'actions' must be an array")
     actions = [
         _parse_action(raw, i, has_server=base_url is not None)
         for i, raw in enumerate(raw_actions)
@@ -185,6 +210,19 @@ def _parse_manifest(data: object) -> AppManifest:
     if dupes:
         raise ValueError(f"app.json: duplicate action names: {dupes}")
 
+    view = data.get("view")
+    view_kind: str | None = None
+    if view is not None:
+        if not isinstance(view, dict):
+            raise ValueError("app.json: 'view' must be an object")
+        view_kind = view.get("kind")
+        if view_kind not in VIEW_KINDS:
+            raise ValueError(
+                f"app.json: view.kind must be one of {sorted(VIEW_KINDS)} (got {view_kind!r})"
+            )
+        if view_kind == "external" and base_url is None:
+            raise ValueError("app.json: view.kind 'external' requires a 'server.baseUrl'")
+
     icon = data.get("icon")
     return AppManifest(
         name=data["name"].strip(),
@@ -193,6 +231,7 @@ def _parse_manifest(data: object) -> AppManifest:
         server_base_url=base_url,
         server_auth=server_auth,
         actions=actions,
+        view_kind=view_kind,
     )
 
 

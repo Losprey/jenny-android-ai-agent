@@ -589,7 +589,10 @@
     "unavailableWhy": "Non disponibile: {reason}",
     "loadFailed": "Non è stato possibile leggere l'elenco.",
     "azGuide": "Guida alfabetica",
-    "jumpToLetter": "Vai alla lettera {letter}"
+    "jumpToLetter": "Vai alla lettera {letter}",
+    "frameCleartextBlocked": "{host} non si carica: usa http e la policy di rete dell'app permette il traffico in chiaro solo verso il gateway locale. Servono un server in https, oppure un'app di tipo vista esterna.",
+    "frameLoadFailed": "{host} non si è caricato: {reason}",
+    "viewProxyFailed": "Impossibile aprire la vista esterna: {error}"
   },
   "wiki": {
     "home": "Wiki",

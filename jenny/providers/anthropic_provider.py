@@ -26,6 +26,7 @@ from jenny.providers.base import (
     LLMProvider,
     LLMResponse,
     ToolCallRequest,
+    describe_exc,
     parse_tool_arguments,
 )
 from jenny.providers.body_merge import deep_merge
@@ -117,7 +118,7 @@ class AnthropicProvider(AnthropicConversionMixin, LLMProvider):
                 except Exception:
                     payload = None
         payload_text = payload if isinstance(payload, str) else str(payload) if payload is not None else ""
-        msg = f"Error: {payload_text.strip()[:500]}" if payload_text.strip() else f"Error calling LLM: {e}"
+        msg = f"Error: {payload_text.strip()[:500]}" if payload_text.strip() else f"Error calling LLM: {describe_exc(e)}"
         retry_after = cls._extract_retry_after_from_headers(headers)
         if retry_after is None:
             retry_after = LLMProvider._extract_retry_after(msg)
@@ -584,7 +585,7 @@ class AnthropicProvider(AnthropicConversionMixin, LLMProvider):
             # this only adds partial_content when the stream had already
             # produced text before crashing (#audit mid-stream-exception loss).
             return LLMResponse(
-                content=f"Error calling LLM: {exc}",
+                content=f"Error calling LLM: {describe_exc(exc)}",
                 finish_reason="error",
                 partial_content="".join(content_parts) or None,
             )

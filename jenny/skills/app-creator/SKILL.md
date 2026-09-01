@@ -62,7 +62,7 @@ hand-rolled overlay `<div>`. See "Internal navigation and the Android back butto
 <rule>
 **Follow the Guided Conversation Flow below.** Ask ONE question at a time. Only write files
 AFTER the user has confirmed name and actions in Phase 3.
-Never write real secrets into app.json or index.html — use `secretRef` (see Secrets below).
+Never write real secrets into app.json or index.html, and never declare `server.auth` at all (see Secrets below).
 
 **This conversation is not a sustained goal: do not call `long_task` for it.** Each phase
 ends by asking the user something and waiting, which is the one thing a goal cannot do for
@@ -90,7 +90,7 @@ the agent should be able to do on the user's behalf, becomes one action:
 - Local data (notes, lists, logs) → `storage` actions on collections in `data/`.
 - External server (e.g. a LAN plant server) → `http` actions mapped onto its endpoints.
 
-If an endpoint needs auth, ask for the secret NAME only, never the value (see Secrets).
+If an endpoint needs auth, it cannot be used yet — say so (see Secrets).
 
 ### Phase 3: Propose and Confirm
 
@@ -135,14 +135,18 @@ Then tell the user the app is ready and will appear in the Jenny Apps grid.
 
 ## Secrets
 
-`app.json` must only ever contain `"auth": {"secretRef": "<name>"}`. The actual token lives
-in the gateway secrets store, excluded from agent reads, and is injected by the action proxy
-at call time. Current gateway versions do not implement the store yet and call the server
-without credentials (fine for LAN servers without auth) — still write `secretRef`, never a
-raw token, so manifests keep working when the store lands. When an app needs a token, pick a name (e.g. `piante_token`), put the
-`secretRef` in the manifest, and ask the user to store the value under that name from the
-settings UI. If the user pastes a token in chat, do not echo it and do not write it to any
-file in the workspace.
+**Never write an `auth` block in `app.json` — not even `{"secretRef": "<name>"}`.** The
+credential store is not implemented, and the http executor is fail-closed: a manifest that
+declares `server.auth` has **every** http action refused with 501, and since Sept 2026 the
+app is rejected at load as broken. This section previously said to write `secretRef` anyway
+"so manifests keep working when the store lands"; that advice shipped a real app whose only
+action was dead on arrival, and it is withdrawn.
+
+So: an app can only talk to an endpoint that needs no credentials (a LAN or Tailscale server
+without auth is the normal case). If the user's endpoint *does* need a token, say plainly
+that Jenny Apps cannot authenticate to an app server yet, and do not write a manifest that
+pretends otherwise. Never put a raw token in `app.json` or `index.html`. If the user pastes a
+token in chat, do not echo it and do not write it to any file in the workspace.
 
 ## Boundaries
 

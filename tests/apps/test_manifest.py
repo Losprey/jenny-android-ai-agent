@@ -19,7 +19,7 @@ VALID_MANIFEST = {
     "name": "Piante",
     "description": "Monitoraggio piante",
     "icon": "ti-plant",
-    "server": {"baseUrl": "http://192.168.1.50:8080", "auth": {"secretRef": "piante_token"}},
+    "server": {"baseUrl": "http://192.168.1.50:8080"},
     "actions": [
         {"name": "lista_piante", "description": "Elenco", "kind": "http",
          "method": "GET", "path": "/plants"},
@@ -49,10 +49,91 @@ class TestLoadApp:
         assert app.manifest.name == "Piante"
         assert app.manifest.icon == "ti-plant"
         assert app.manifest.server_base_url == "http://192.168.1.50:8080"
-        assert app.manifest.server_auth == {"secretRef": "piante_token"}
+        assert app.manifest.server_auth is None
         assert [a.name for a in app.manifest.actions] == ["lista_piante", "umidita", "annota"]
         assert app.manifest.actions[2].op == "append"
         assert app.manifest.actions[2].collection == "cure"
+
+    def test_display_only_app_needs_no_actions(self, tmp_path):
+        """Un'app che disegna solo uno schermo non ha niente da dichiarare.
+
+        Il vincolo `actions` non vuoto ha prodotto in produzione un'azione
+        *inventata* (un ping verso il server, mai chiesto da nessuno) messa
+        lì solo per far passare lo schema. `.agent/jenny-apps.md` ha sempre
+        detto che il lato agente è qualcosa che un'app "can" avere.
+        """
+        for manifest in (
+            {"name": "Vista", "description": "Solo uno schermo"},          # assente
+            {"name": "Vista", "description": "Solo uno schermo", "actions": []},  # vuoto
+        ):
+            app = load_app(_write_app(tmp_path, "vista", manifest))
+            assert not app.broken, app.error
+            assert app.manifest.actions == []
+
+    def test_actions_must_still_be_a_list(self, tmp_path):
+        """Ammettere il vuoto non deve ammettere il tipo sbagliato."""
+        manifest = {"name": "X", "description": "Y", "actions": "annota"}
+        app = load_app(_write_app(tmp_path, "tipo", manifest))
+        assert app.broken
+        assert "'actions' must be an array" in app.error
+
+    def test_server_auth_is_rejected_at_load(self, tmp_path):
+        """Un'app con `server.auth` è rotta, non silenziosamente mezza viva.
+
+        Non esiste un credential store, e `execute_http_action` è fail-closed:
+        con `auth` dichiarato *tutte* le azioni http rispondono 501. Prima
+        l'app passava la validazione, si apriva, e il difetto si scopriva solo
+        tentando un'azione — che è come è finito in produzione.
+        """
+        manifest = dict(VALID_MANIFEST)
+        manifest["server"] = {
+            "baseUrl": "http://192.168.1.50:8080",
+            "auth": {"secretRef": "piante_token"},
+        }
+        app = load_app(_write_app(tmp_path, "conauth", manifest))
+        assert app.broken
+        assert "server.auth" in app.error
+        # L'errore deve nominare il rimedio: è l'unica cosa che chi lo legge
+        # può fare, e senza dirlo il messaggio manda a cercare il credential store.
+        assert "remove the 'auth' block" in app.error
+
+    def test_external_view_loads(self, tmp_path):
+        """La forma che rende esprimibile "incornicia il mio server".
+
+        Prima non lo era: un iframe verso un `http://` non-loopback viene
+        rifiutato dalla policy di rete dell'APK, e nessun campo del manifest
+        poteva dire "questo schermo sta altrove".
+        """
+        manifest = {
+            "name": "Telecomando", "description": "Il telecomando di hps",
+            "server": {"baseUrl": "http://hps:8091"},
+            "view": {"kind": "external"},
+        }
+        app = load_app(_write_app(tmp_path, "telecomando", manifest))
+        assert not app.broken, app.error
+        assert app.manifest.view_kind == "external"
+        assert app.manifest.actions == []  # una vista non ha bisogno di azioni
+
+    def test_external_view_requires_a_server(self, tmp_path):
+        manifest = {"name": "X", "description": "y", "view": {"kind": "external"}}
+        app = load_app(_write_app(tmp_path, "senzaserver", manifest))
+        assert app.broken
+        assert "requires a 'server.baseUrl'" in app.error
+
+    def test_unknown_view_kind_is_rejected(self, tmp_path):
+        """Un kind mistyped non deve diventare silenziosamente un'app normale."""
+        manifest = {
+            "name": "X", "description": "y",
+            "server": {"baseUrl": "http://h:1"},
+            "view": {"kind": "externl"},
+        }
+        app = load_app(_write_app(tmp_path, "typo", manifest))
+        assert app.broken
+        assert "view.kind" in app.error
+
+    def test_no_view_block_means_a_normal_app(self, tmp_path):
+        app = load_app(_write_app(tmp_path, "piante", VALID_MANIFEST))
+        assert app.manifest.view_kind is None
 
     def test_malformed_json_is_broken_not_raised(self, tmp_path):
         app_dir = _write_app(tmp_path, "rotta", "{not json")

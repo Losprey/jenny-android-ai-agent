@@ -32,6 +32,10 @@ def list_apps_payload(workspace: Path) -> dict:
                     "description": app.manifest.description,
                     "icon": app.manifest.icon,
                     "has_server": app.manifest.server_base_url is not None,
+                    # La SPA deve saperlo *prima* di aprire: una vista esterna
+                    # non incornicia app/index.html, chiede l'URL del proxy e
+                    # usa un sandbox diverso (v. openApp in mobile-apps.js).
+                    "view_kind": app.manifest.view_kind,
                 }
             )
         else:
@@ -41,6 +45,7 @@ def list_apps_payload(workspace: Path) -> dict:
                     "description": "",
                     "icon": "ti-alert-triangle",
                     "has_server": False,
+                    "view_kind": None,
                 }
             )
         if app.broken:
