@@ -22,6 +22,7 @@ from jenny.channels.http_utils import FALSY_VALUES, TRUTHY_VALUES, parse_flag
 from jenny.config import store
 from jenny.config.loader import get_config_path, load_config
 from jenny.config.schema import KEEP_AWAKE_MODES, Config
+from jenny.providers.tls import CaBundleError, build_ssl_context
 from jenny.security.workspace_access import workspace_sandbox_status
 from jenny.security.workspace_policy import _safe_expanduser
 from jenny.session.keys import UNIFIED_SESSION_KEY
@@ -574,6 +575,17 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
             "message": "Configure this provider before loading models.",
         }
 
+    # La sonda deve fidarsi di cio' di cui si fida il provider vero: senza
+    # questo, chi configura la propria CA la vede funzionare in chat e continua a
+    # trovare il catalogo modelli vuoto, con un errore TLS che sembra un secondo
+    # guasto invece dello stesso.
+    try:
+        ssl_context = build_ssl_context(
+            provider_config.ca_bundle, provider_name=provider_config.name
+        )
+    except CaBundleError as exc:
+        return {**base_payload, "status": "error", "message": str(exc)}
+
     headers = {"Accept": "application/json"}
     if provider_config.format == "anthropic":
         # Messages API: auth via x-api-key e /v1/models (la base non include /v1).
@@ -606,6 +618,7 @@ def provider_models_payload(query: QueryParams) -> dict[str, Any]:
             headers=headers,
             timeout=10.0,
             follow_redirects=False,
+            verify=ssl_context or True,
         )
         response.raise_for_status()
         rows = _extract_model_rows(response.json())
@@ -762,6 +775,7 @@ def _provider_list_simple(config: Any = None) -> list[dict[str, Any]]:
             "api_base": p.api_base,
             "configured": bool(p.api_key or p.api_base),
             "api_type": p.api_type,
+            "ca_bundle": p.ca_bundle,
         })
     return result
 
@@ -1105,12 +1119,50 @@ async def update_provider(data: dict[str, Any]) -> dict[str, Any]:
 
     api_key = (data.get("api_key") or "").strip() or None
     api_base = (data.get("api_base") or "").strip() or None
+    ca_bundle = (data.get("ca_bundle") or "").strip() or None
+    # Il campo vuoto non arriva fin qui: ``_postWithQuery`` scarta le stringhe
+    # vuote, ed e' quello che fa funzionare "chiave vuota = tieni quella
+    # salvata". Svuotare la CA vuole quindi un segnale suo, esplicito.
+    clear_ca_bundle = parse_flag(data.get("ca_bundle_clear"))
+    if ca_bundle is not None:
+        # Validata **prima** di entrare in ``store.mutate``: leggere e parsare un
+        # PEM e' I/O, e sotto quel lock l'I/O non ci va (v. AGENTS.md). Ed e' la
+        # garanzia piu' forte che si possa dare qui — fallendo prima, il file di
+        # configurazione non viene nemmeno aperto.
+        #
+        # Si valida solo cio' che arriva dalla richiesta, non cio' che era gia'
+        # su disco: un PEM sparito dopo non deve rendere impossibile correggere
+        # il *base URL* dello stesso provider. In pratica il dialog ripropone
+        # sempre il percorso salvato, quindi un file diventato irraggiungibile
+        # viene comunque intercettato al primo salvataggio — con il campo sotto
+        # gli occhi di chi legge l'errore.
+        try:
+            build_ssl_context(ca_bundle, provider_name=name)
+        except CaBundleError as exc:
+            raise WebUISettingsError(str(exc)) from exc
 
     def _apply(config: Config) -> None:
-        _upsert_provider(config, name, fmt, api_key, api_base)
+        _upsert_provider(
+            config, name, fmt, api_key, api_base,
+            ca_bundle=ca_bundle, clear_ca_bundle=clear_ca_bundle,
+        )
 
     await store.mutate(_apply)
     return settings_payload()
+
+
+def _resolved_ca_bundle(
+    stored: str | None, requested: str | None, clear: bool
+) -> str | None:
+    """Valore da persistere per ``caBundle``: tre casi, nessun I/O.
+
+    Assente non significa vuoto — un client che non manda il campo non deve
+    cancellare la CA — e per questo svuotarla ha un segnale suo. La validazione
+    e' gia' avvenuta in ``update_provider``, fuori dal lock di ``store.mutate``.
+    """
+    if clear:
+        return None
+    return stored if requested is None else requested
 
 
 def _upsert_provider(
@@ -1119,6 +1171,9 @@ def _upsert_provider(
     fmt: str,
     api_key: str | None,
     api_base: str | None,
+    *,
+    ca_bundle: str | None = None,
+    clear_ca_bundle: bool = False,
 ) -> None:
     """Inserisce o aggiorna il provider *name* dentro *config*."""
     providers = config.providers.providers
@@ -1133,6 +1188,7 @@ def _upsert_provider(
             if api_key and api_key != _mask_api_key(p.api_key):
                 p.api_key = api_key
             p.api_base = api_base or p.api_base
+            p.ca_bundle = _resolved_ca_bundle(p.ca_bundle, ca_bundle, clear_ca_bundle)
             break
     else:
         from jenny.config.schema import ProviderConfig
@@ -1142,6 +1198,7 @@ def _upsert_provider(
             format=fmt,
             api_key=api_key,
             api_base=api_base,
+            ca_bundle=_resolved_ca_bundle(None, ca_bundle, clear_ca_bundle),
         ))
 
     if not config.providers.default:

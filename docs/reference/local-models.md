@@ -19,9 +19,9 @@ Practically, this means:
 | Endpoint location | Works with plain `http://`? | What you need |
 |---|---|---|
 | `http://127.0.0.1:PORT` or `http://localhost:PORT` | Yes | Only reachable if the model server runs *on the phone itself* — not a typical setup. |
-| `http://192.168.x.x:PORT` (LAN) | **No** | Put a TLS-terminating reverse proxy in front of the model server (self-signed certs work, but the phone must trust the CA — a public/valid cert is the path of least friction), or otherwise serve it over `https://`. |
+| `http://192.168.x.x:PORT` (LAN) | **No** | Put a TLS-terminating reverse proxy in front of the model server, or otherwise serve it over `https://`. A self-signed certificate works, but installing the CA on the phone does **not** make Jenny trust it — see [Self-signed certificates](./providers.md#self-signed-certificates) for the field that does. |
 | `http://<tailscale-ip>:PORT` | **No** | Same requirement: HTTPS. Tailscale itself doesn't change the cleartext rule — it just changes the routing. |
-| `https://anything` | Yes | No special handling needed beyond a valid TLS chain the phone trusts. |
+| `https://anything` | Yes | No special handling needed beyond a TLS chain Jenny trusts — the bundled default roots, plus whatever the provider's `caBundle` adds. |
 
 If you're used to running Ollama or LM Studio with their default plain-HTTP listener and pointing a desktop app at it directly, that setup will not work unmodified from the phone — you'll need HTTPS in front of it.
 

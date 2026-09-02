@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import ssl
 import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -72,6 +73,7 @@ class OpenAICompatProvider(ResponseParsingMixin, LLMProvider):
         extra_body: dict[str, Any] | None = None,
         api_type: str = "auto",
         extra_query: dict[str, str] | None = None,
+        ssl_context: ssl.SSLContext | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -89,6 +91,9 @@ class OpenAICompatProvider(ResponseParsingMixin, LLMProvider):
             self._default_headers.update(extra_headers)
         self._api_key_for_client = api_key or "no-key"
         self._is_local = _is_local_endpoint(effective_base)
+        # Contesto TLS del provider: ``None`` = default di httpx. Lo costruisce
+        # il factory (v. ``providers/tls.py``), qui si inoltra e basta.
+        self._ssl_context = ssl_context
 
         self._http_client: httpx.AsyncClient | None = None
 
@@ -100,15 +105,26 @@ class OpenAICompatProvider(ResponseParsingMixin, LLMProvider):
     def _build_http_client(self) -> None:
         """Create a plain httpx client for the SDK-free path."""
         timeout_s = _openai_compat_timeout_s(local=self._is_local)
+        # Senza CA di provider resta ``True``, che e' esattamente il default di
+        # httpx: la fiducia di default non la ridefiniamo noi.
+        verify = self._ssl_context or True
         if self._is_local:
             _local_limits = httpx.Limits(keepalive_expiry=0)
             self._http_client = httpx.AsyncClient(
                 limits=_local_limits,
                 timeout=timeout_s,
-                transport=httpx.AsyncHTTPTransport(proxy=None, limits=_local_limits),
+                # ``verify`` va sul **transport**, non sul client: quando si passa
+                # un transport esplicito httpx restituisce quello e basta
+                # (``AsyncClient._init_transport``: ``if transport is not None:
+                # return transport``), quindi il ``verify`` del client verrebbe
+                # ignorato in silenzio — cioe' la CA dell'utente non varrebbe
+                # niente proprio sul ramo loopback, senza un errore a dirlo.
+                transport=httpx.AsyncHTTPTransport(
+                    proxy=None, limits=_local_limits, verify=verify,
+                ),
             )
         else:
-            self._http_client = httpx.AsyncClient(timeout=timeout_s)
+            self._http_client = httpx.AsyncClient(timeout=timeout_s, verify=verify)
 
     async def _ensure_client(self) -> None:
         """Return the shared client, creating it on first call."""

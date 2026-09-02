@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import suppress
 from typing import Any
@@ -49,6 +50,7 @@ class AnthropicProvider(AnthropicConversionMixin, LLMProvider):
         extra_body: dict[str, Any] | None = None,
         extra_query: dict[str, str] | None = None,
         api_type: str = "auto",
+        ssl_context: ssl.SSLContext | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
@@ -63,6 +65,9 @@ class AnthropicProvider(AnthropicConversionMixin, LLMProvider):
                 "Provider apiType={!r} has no meaning for the Anthropic format; ignoring",
                 api_type,
             )
+        # Contesto TLS del provider: ``None`` = default di httpx. Lo costruisce
+        # il factory (v. ``providers/tls.py``), qui si inoltra e basta.
+        self._ssl_context = ssl_context
         self._http_client: httpx.AsyncClient | None = None
         self._init_http_client()
 
@@ -84,6 +89,9 @@ class AnthropicProvider(AnthropicConversionMixin, LLMProvider):
             base_url=base_url,
             headers=headers,
             timeout=request_timeout_s(local=self._is_local),
+            # Senza CA di provider resta ``True``, che e' esattamente il default
+            # di httpx: la fiducia di default non la ridefiniamo noi.
+            verify=self._ssl_context or True,
         )
 
     @staticmethod

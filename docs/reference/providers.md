@@ -48,10 +48,39 @@ The full field set, only reachable by hand-editing `providers.providers[]` in `c
 | `format` | yes | `"anthropic"` or `"openai_compat"`. The only field that picks the backend. |
 | `apiKey` | yes | The gateway refuses to start a provider without one — see the exact error below. Local servers that don't check keys still need a placeholder like `"EMPTY"`. |
 | `apiBase` | no | Full HTTP base URL, version path included where the service expects it (e.g. `/v1`). Omit to use the format's default. |
+| `caBundle` | no | Path to a PEM certificate to trust on top of the default roots — for a server with a certificate signed by your own CA. Relative paths start at the workspace. Also editable in Settings. See [Self-signed certificates](#self-signed-certificates). |
 | `apiType` | no, `openai_compat` only | `"auto"` (default), `"chat_completions"`, or `"responses"`. See [Chat Completions vs. Responses API](#chat-completions-vs-responses-api-openai_compat-only). Config-only — not in Settings. |
 | `extraHeaders` / `extraBody` / `extraQuery` | no | Extra request headers, body fields, and query params merged into every request to this provider. Config-only. |
 
 Keys may be written as camelCase or snake_case in the file; Jenny always writes camelCase back when it saves.
+
+## Self-signed certificates
+
+If your server's certificate is signed by a CA of your own, installing that CA on the phone
+does nothing for Jenny. Her HTTP calls are made by the Python runtime bundled inside the APK,
+and that runtime carries **its own** set of trusted roots; Android's system and user
+certificate stores are never consulted. The symptom is
+`[SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate`.
+
+Name the CA in the provider instead:
+
+1. Get the PEM file into the workspace. Sending it to Jenny as a chat attachment puts it in
+   `workspace/uploads/`; asking her to save the text you paste works too.
+2. Settings → Model → API keys → Edit the provider → **CA certificate**, and enter the path
+   (relative paths start at the workspace, so `uploads/ca.pem` is enough).
+
+The trust is **added**, not swapped: the default roots stay in place, so a provider that also
+talks to a publicly-signed host keeps working. The same trust is used by the model catalog
+probe, so the model list loads too.
+
+If the file is missing, unreadable, or isn't a certificate, Settings refuses the save and says
+which path failed — Jenny never quietly falls back to her own bundle, because that would leave
+you believing you're using your certificate when you aren't. The same check runs at startup: a
+`caBundle` that has gone missing since (a wiped workspace, a restore from backup — the file
+lives in the workspace, so it does travel in a backup) stops the provider from being built, and
+the gateway starts in its "no provider configured" state with the reason in the log.
+
+Disabling certificate verification is deliberately not offered.
 
 ## Choosing the active provider
 

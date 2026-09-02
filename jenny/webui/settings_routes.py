@@ -223,6 +223,12 @@ class WebUISettingsRouter:
                 data["api_key"] = api_key
             if api_base := _query_param(query, "api_base"):
                 data["api_base"] = api_base
+            if ca_bundle := _query_param(query, "ca_bundle"):
+                data["ca_bundle"] = ca_bundle
+            # Segnale separato perche' il client non puo' mandare la stringa
+            # vuota: v. il commento in ``update_provider``.
+            if clear := _query_param(query, "ca_bundle_clear"):
+                data["ca_bundle_clear"] = clear
             return await update_provider(data)
 
         def after(query: QueryParams, payload: dict[str, Any]) -> None:
