@@ -15,6 +15,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from jenny.bus.queue import MessageBus
+from jenny.channels.http_utils import parse_flag
 from jenny.webui.settings_api import (
     WebUISettingsError,
     delete_provider,
@@ -137,8 +138,8 @@ class WebUISettingsRouter:
             return await self._handle_telegram_save(request)
         if path == "/api/telegram/unpair":
             return await self._handle_telegram_unpair(request)
-        if path == "/api/telegram/disable":
-            return await self._handle_telegram_disable(request)
+        if path == "/api/telegram/update":
+            return await self._handle_telegram_enabled(request)
         return None
 
     def _query(self, request: WsRequest) -> QueryParams:
@@ -533,18 +534,23 @@ class WebUISettingsRouter:
         self._fire_telegram_changed()
         return self._json_response(payload)
 
-    async def _handle_telegram_disable(self, request: WsRequest) -> Response:
+    async def _handle_telegram_enabled(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
-        from jenny.webui.telegram_api import disable_telegram
+        from jenny.webui.telegram_api import set_telegram_enabled
 
+        # ``parse_flag`` e' vero solo se il valore e' dichiarato vero, quindi un
+        # parametro assente o storto spegne. Va bene per un toggle — il client
+        # manda sempre ``true``/``false`` esplicito — ed e' il verso prudente:
+        # il caso ambiguo lascia il canale fermo, non lo accende.
+        enabled = parse_flag(_query_param(self._query(request), "enabled"))
         try:
-            payload = await disable_telegram()
+            payload = await set_telegram_enabled(enabled)
         except WebUISettingsError as e:
             return self._error_response(e.status, e.message)
         except Exception:
-            self.logger.exception("telegram disable failed")
-            return self._error_response(500, "failed to disable telegram")
+            self.logger.exception("telegram enabled toggle failed")
+            return self._error_response(500, "failed to update telegram channel")
         self._fire_telegram_changed()
         return self._json_response(payload)
 

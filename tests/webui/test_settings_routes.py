@@ -464,3 +464,85 @@ async def test_a_failed_write_does_not_rearm_any_job(
 
     assert response.status_code == 500
     on_jobs_changed.assert_not_called()
+
+
+# --- toggle del canale Telegram --------------------------------------------
+
+
+def _telegram_configured(config_path, *, enabled: bool) -> None:
+    """Config con token e chat accoppiata, nello stato di partenza richiesto."""
+    config = Config()
+    config.telegram.enabled = enabled
+    config.telegram.bot_token = "123456789:AAtestTOKENtestTOKENtestTOKEN"
+    config.telegram.paired_chat_id = "21824351"
+    save_config(config, config_path)
+
+
+async def test_telegram_update_requires_auth(config_path) -> None:
+    router = _router()
+    response = await router.dispatch(
+        _request("/api/telegram/update?enabled=false", token=None), "/api/telegram/update"
+    )
+    assert response.status_code == 401
+
+
+async def test_telegram_update_off_then_on_round_trips(config_path) -> None:
+    """Il giro completo che prima era una porta a senso unico.
+
+    Lo spegnimento e la riaccensione passano dalla *stessa* rotta, e in mezzo il
+    pairing non si muove: e' il punto di tutto il lavoro.
+    """
+    _telegram_configured(config_path, enabled=True)
+    router = _router(on_telegram_changed=MagicMock())
+
+    off = await router.dispatch(
+        _request("/api/telegram/update?enabled=false"), "/api/telegram/update"
+    )
+    assert off.status_code == 200
+    assert _json(off)["enabled"] is False
+    assert load_config().telegram.enabled is False
+
+    on = await router.dispatch(
+        _request("/api/telegram/update?enabled=true"), "/api/telegram/update"
+    )
+    assert on.status_code == 200
+    assert _json(on)["enabled"] is True
+    config = load_config()
+    assert config.telegram.enabled is True
+    assert config.telegram.paired_chat_id == "21824351"
+
+
+async def test_telegram_update_fires_reload(config_path) -> None:
+    """Senza questo il toggle scrive il file e il canale resta come stava."""
+    _telegram_configured(config_path, enabled=True)
+    on_changed = MagicMock()
+    router = _router(on_telegram_changed=on_changed)
+    response = await router.dispatch(
+        _request("/api/telegram/update?enabled=false"), "/api/telegram/update"
+    )
+    assert response.status_code == 200
+    on_changed.assert_called_once()
+
+
+async def test_telegram_update_enable_without_token_maps_to_400(config_path) -> None:
+    router = _router(on_telegram_changed=MagicMock())
+    response = await router.dispatch(
+        _request("/api/telegram/update?enabled=true"), "/api/telegram/update"
+    )
+    assert response.status_code == 400
+    assert load_config().telegram.enabled is False
+
+
+async def test_telegram_update_missing_param_switches_off(config_path) -> None:
+    """``parse_flag`` e' vero solo se dichiarato vero: l'ambiguo spegne.
+
+    Fissa il verso prudente, cosi' una richiesta storta non accende un canale
+    che l'utente non ha chiesto.
+    """
+    _telegram_configured(config_path, enabled=True)
+    router = _router(on_telegram_changed=MagicMock())
+    response = await router.dispatch(
+        _request("/api/telegram/update"), "/api/telegram/update"
+    )
+    assert response.status_code == 200
+    assert load_config().telegram.enabled is False
