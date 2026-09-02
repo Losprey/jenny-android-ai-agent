@@ -55,12 +55,19 @@ export class TelegramPairingWidget {
     this.render();
   }
 
+  /* L'ordine dei rami è la correzione, non un dettaglio: `paired` stava per
+     primo e `enabled` non veniva letto in quel ramo, quindi un canale spento ma
+     accoppiato mostrava «✓ Collegato» — lo stato in cui il telefono è rimasto
+     dal 29/08 al 02/09 senza che niente lo dicesse. Uno stato spento non ha
+     alcuna rappresentazione se non si guarda `enabled` prima di tutto il resto. */
   render() {
     if (this._destroyed) return;
     this._stopPolling();
     const s = this.status;
     if (!s) return;
-    if (s.paired) {
+    if (s.configured && !s.enabled) {
+      this._renderDisabled();
+    } else if (s.paired) {
       this._renderPaired();
     } else if (s.enabled && s.configured && s.pairing_code) {
       this._renderPairing();
@@ -68,6 +75,25 @@ export class TelegramPairingWidget {
     } else {
       this._renderTokenForm();
     }
+  }
+
+  /* La riga del toggle, sullo stampo di `_renderSshBlock` in mobile-settings.js:
+     stesso markup e stesse classi, così le sezioni delle impostazioni si
+     somigliano invece di avere ognuna il suo interruttore. */
+  _toggleRowHtml(checked) {
+    return `
+      <div class="settings-field settings-toggle-row">
+        <label class="settings-label">${i18n.t('settings.telegram.enable')}</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="tg-enabled-toggle" ${checked ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>`;
+  }
+
+  _wireToggle() {
+    const el = this.el.querySelector('#tg-enabled-toggle');
+    if (el) el.addEventListener('change', () => this._setEnabled(el.checked));
   }
 
   // ── Stato: non configurato ──────────────────────────────────────────
@@ -138,7 +164,12 @@ export class TelegramPairingWidget {
       </div>`;
     this.el.querySelector('#tg-change-token').addEventListener('click', () => {
       this._stopPolling();
-      this.status = { ...this.status, configured: true, enabled: false, pairing_code: null };
+      /* Si azzera **solo** `pairing_code`, che è quanto basta a far cadere
+         `render()` sul form del token. Prima qui si scriveva anche
+         `enabled: false`, una bugia locale sullo stato del server che era
+         innocua finché nessun ramo guardava `enabled`: ora ci sarebbe la card
+         del canale spento, per un canale che è accesissimo. */
+      this.status = { ...this.status, configured: true, pairing_code: null };
       this._renderTokenForm();
     });
   }
@@ -176,27 +207,51 @@ export class TelegramPairingWidget {
     const s = this.status;
     const who = s.paired_username ? `@${escapeHtml(s.paired_username)}` : i18n.t('settings.telegram.aChat');
     const bot = s.bot_username ? ` (@${escapeHtml(s.bot_username)})` : '';
-    const settingsButtons = this.mode === 'settings' ? `
-      <div class="onboarding-nav">
-        <button class="onboarding-btn onboarding-btn-secondary" id="tg-unpair">
-          ${i18n.t('settings.telegram.unpair')}
-        </button>
-        <button class="onboarding-btn onboarding-btn-secondary" id="tg-disable">
-          ${i18n.t('settings.telegram.disable')}
-        </button>
-      </div>` : '';
+    /* Un solo bottone, e il toggle sopra. Prima erano due bottoni identici
+       affiancati — «Scollega» e «Disattiva», stessa classe, nessuna conferma —
+       ed è così che il canale è stato spento per sbaglio: su un telefono in mano
+       la distanza fra i due è un pollice. Il toggle sta in una riga sua, dice lo
+       stato invece di un'azione, e se lo sfiori si ri-tocca per rimediare
+       invece di dover rifare il pairing. */
     this.el.innerHTML = `
+      ${this.mode === 'settings' ? this._toggleRowHtml(true) : ''}
       <div class="tg-paired">
         <i class="ti ti-circle-check"></i>
         ${i18n.t('settings.telegram.paired', { who })}${bot}
       </div>
       ${this._batteryHtml()}
-      ${settingsButtons}`;
+      ${this.mode === 'settings' ? `
+      <div class="onboarding-nav">
+        <button class="onboarding-btn onboarding-btn-secondary" id="tg-unpair">
+          ${i18n.t('settings.telegram.unpair')}
+        </button>
+      </div>` : ''}`;
     const unpairBtn = this.el.querySelector('#tg-unpair');
     if (unpairBtn) unpairBtn.addEventListener('click', () => this._unpair());
-    const disableBtn = this.el.querySelector('#tg-disable');
-    if (disableBtn) disableBtn.addEventListener('click', () => this._disable());
+    this._wireToggle();
     wireBatteryExemption(this.el);
+  }
+
+  // ── Stato: configurato ma spento ────────────────────────────────────
+
+  /* Lo stato che prima non esisteva. Il toggle c'è in *entrambe* le modalità,
+     non solo in `settings`: è l'unica via d'uscita da qui, e nasconderlo
+     riprodurrebbe il vicolo cieco che questa card viene a chiudere. */
+  _renderDisabled() {
+    const s = this.status;
+    const bot = s.bot_username ? ` (@${escapeHtml(s.bot_username)})` : '';
+    const who = s.paired_username ? `@${escapeHtml(s.paired_username)}` : null;
+    const keeps = who
+      ? i18n.t('settings.telegram.disabledPaired', { who })
+      : i18n.t('settings.telegram.disabledUnpaired');
+    this.el.innerHTML = `
+      ${this._toggleRowHtml(false)}
+      <div class="tg-disabled">
+        <i class="ti ti-circle-off"></i>
+        ${i18n.t('settings.telegram.disabledTitle')}${bot}
+      </div>
+      <p class="onboarding-hint">${keeps}</p>`;
+    this._wireToggle();
   }
 
   /* Stessa card condivisa delle impostazioni e dell'onboarding, ma con il
@@ -222,15 +277,26 @@ export class TelegramPairingWidget {
     }
   }
 
-  async _disable() {
+  /* Il toggle è già visivamente girato quando arriviamo qui: il browser cambia
+     il checkbox da sé, prima di `change`. Quindi un rifiuto del server non basta
+     segnalarlo col toast — va anche rimessa a posto la levetta, altrimenti resta
+     a dichiarare uno stato che non è stato salvato. Da qui il `render()` anche
+     nel ramo d'errore, che ridisegna dallo `status` vecchio, quello vero. */
+  async _setEnabled(enabled) {
     if (this._busy) return;
     this._busy = true;
+    const el = this.el.querySelector('#tg-enabled-toggle');
+    if (el) el.disabled = true;
     try {
-      this.status = await api.disableTelegram();
-      showToast(i18n.t('settings.telegram.disabled'), 'info');
+      this.status = await api.setTelegramEnabled(enabled);
+      showToast(
+        i18n.t(enabled ? 'settings.telegram.enabled' : 'settings.telegram.disabled'),
+        'info',
+      );
       this.render();
     } catch (e) {
       showToast(e.message || i18n.t('settings.telegram.saveFailed'), 'error');
+      this.render();
     } finally {
       this._busy = false;
     }

@@ -1,5 +1,5 @@
 """Test per ``jenny.webui.telegram_api``: masking del token, salvataggio con
-validazione getMe, unpair/disable e persistenza del pairing."""
+validazione getMe, unpair, toggle enabled e persistenza del pairing."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from jenny.config.schema import Config
 from jenny.runtime.context import get_runtime_context
 from jenny.webui.settings_api import WebUISettingsError
 from jenny.webui.telegram_api import (
-    disable_telegram,
     record_paired,
     save_telegram_token,
+    set_telegram_enabled,
     telegram_status_payload,
     unpair_telegram,
 )
@@ -184,13 +184,79 @@ async def test_unpair_without_token_raises(tmp_path, monkeypatch) -> None:
         await unpair_telegram()
 
 
-async def test_disable_keeps_token(tmp_path, monkeypatch) -> None:
-    _configure(tmp_path, monkeypatch, enabled=True, bot_token=TOKEN)
-    payload = await disable_telegram()
+async def test_disable_keeps_token_and_pairing(tmp_path, monkeypatch) -> None:
+    """Spegnere non cancella niente: e' la precondizione del riaccendere."""
+    _configure(
+        tmp_path,
+        monkeypatch,
+        enabled=True,
+        bot_token=TOKEN,
+        paired_chat_id="21824351",
+        paired_username="someone",
+    )
+    payload = await set_telegram_enabled(False)
     assert payload["enabled"] is False
+    assert payload["paired"] is True
     config = load_config()
     assert config.telegram.bot_token == TOKEN
     assert config.telegram.enabled is False
+    assert config.telegram.paired_chat_id == "21824351"
+    assert config.telegram.paired_username == "someone"
+
+
+async def test_enable_restores_channel_without_touching_pairing(
+    tmp_path, monkeypatch
+) -> None:
+    """Il percorso che prima non esisteva.
+
+    Lo stato di partenza e' quello misurato sul telefono il 02/09/2026: spento,
+    ma con token e chat accoppiata ancora a posto. Riaccendere deve bastare —
+    senza rigenerare un ``pairing_code``, che costringerebbe a rifare il pairing
+    proprio come faceva l'unico percorso disponibile prima (``save_token``).
+    """
+    _configure(
+        tmp_path,
+        monkeypatch,
+        enabled=False,
+        bot_token=TOKEN,
+        paired_chat_id="21824351",
+        paired_username="someone",
+    )
+    payload = await set_telegram_enabled(True)
+    assert payload["enabled"] is True
+    assert payload["paired"] is True
+    assert payload["pairing_code"] is None
+    config = load_config()
+    assert config.telegram.enabled is True
+    assert config.telegram.paired_chat_id == "21824351"
+    assert config.telegram.pairing_code is None
+
+
+async def test_enable_without_token_is_refused(tmp_path, monkeypatch) -> None:
+    """``_init_telegram`` pretende ``enabled and bot_token``.
+
+    Accendere senza token darebbe uno stato che dichiara un canale acceso mentre
+    non ne parte nessuno — lo stesso genere di bugia che questo lavoro chiude.
+    """
+    _configure(tmp_path, monkeypatch)
+    with pytest.raises(WebUISettingsError, match="not configured"):
+        await set_telegram_enabled(True)
+    assert load_config().telegram.enabled is False
+
+
+async def test_toggle_to_same_value_does_not_rewrite_config(
+    tmp_path, monkeypatch
+) -> None:
+    """Un no-op non deve toccare il file ne' ruotare il backup.
+
+    Vale per il doppio tap e per una UI con lo stato vecchio in mano.
+    """
+    _configure(tmp_path, monkeypatch, enabled=True, bot_token=TOKEN)
+    config_path = tmp_path / "config.json"
+    before = config_path.stat().st_mtime_ns
+    payload = await set_telegram_enabled(True)
+    assert payload["enabled"] is True
+    assert config_path.stat().st_mtime_ns == before
 
 
 # --- concorrenza col resto delle impostazioni ------------------------------

@@ -441,6 +441,7 @@
       "oemOpenFailed": "Nessuna schermata di gestione batteria raggiungibile su questo telefono."
     },
     "telegram": {
+      "enable": "Canale attivo",
       "title": "Telegram",
       "intro": "Collega un bot Telegram per parlare con Jenny da qualsiasi dispositivo: il telefono resta il server.",
       "step1": "Apri @BotFather su Telegram e invia /newbot",
@@ -458,10 +459,13 @@
       "paired": "Collegato a {who}",
       "aChat": "una chat",
       "unpair": "Scollega",
-      "disable": "Disattiva",
       "disabled": "Canale Telegram disattivato",
       "batteryHint": "Per risposte immediate anche a telefono non in carica, esenta Jenny dall'ottimizzazione batteria.",
-      "batteryButton": "Esenta dalla batteria"
+      "batteryButton": "Esenta dalla batteria",
+      "enabled": "Canale Telegram attivato",
+      "disabledTitle": "Canale disattivato",
+      "disabledPaired": "Il bot non risponde. Token e collegamento a {who} sono conservati: riaccendendo riprende da dove era, senza rifare il pairing.",
+      "disabledUnpaired": "Il bot non risponde. Il token è conservato: riaccendendo non serve ripassare da BotFather."
     }
   },
   "common": {

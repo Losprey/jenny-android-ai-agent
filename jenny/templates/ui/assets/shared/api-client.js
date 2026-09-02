@@ -540,8 +540,13 @@ class ApiClient {
     return this._telegramGet('/api/telegram/unpair');
   }
 
-  async disableTelegram() {
-    return this._telegramGet('/api/telegram/disable');
+  /* Un solo metodo per i due versi del toggle. Il valore va scritto esplicito
+     (`true`/`false`) e non omesso per dire "falso": `_postWithQuery` scarta le
+     stringhe vuote, e qui l'assenza del parametro significherebbe "spegni" per
+     via del `parse_flag` lato server — comodo per sbaglio, illeggibile a
+     rileggerlo. */
+  async setTelegramEnabled(enabled) {
+    return this._telegramGet(`/api/telegram/update?enabled=${enabled ? 'true' : 'false'}`);
   }
 
   // ── Backup APIs ──

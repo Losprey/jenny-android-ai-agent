@@ -40,18 +40,20 @@ This protection has a sharp edge: **it applies to you too.** If you mistype the 
 
 The attempt counter is kept **in memory only** — it also resets whenever the Jenny app itself restarts, so a restart is a (side-effect) way out too, but don't count on it as a fix.
 
-## Unlink vs. Disable
+## Unlink vs. switching the channel off
 
-Two different buttons appear once you're paired, and they behave differently:
+Once you're paired the section shows a **Channel active** toggle and an **Unpair** button. They do different things, and only one of them costs you the pairing:
 
-| Action | What it does | To reconnect |
+| Action | What it does | To get back |
 |---|---|---|
-| **Unpair** | Clears the paired chat and generates a fresh pairing code. Keeps the channel enabled. | Send the new code to the bot again — no need to touch the token. |
-| **Disable** | Stops the channel entirely (no more polling, the bot won't reply to anything) but keeps the token and the pairing on record. | You have to go through **Connect** again and re-enter the full bot token — there is no separate "re-enable" button, and the saved token is only ever shown as a masked hint, so keep the real token somewhere if you plan to re-enable later. |
+| **Channel active** (off) | Stops the channel entirely: no more polling, and the bot replies to nothing. Nothing is deleted — the token, the paired chat and its username all stay on record. | Switch the same toggle back on. That is the whole recovery: no new token, no new pairing code, no trip to BotFather. |
+| **Unpair** | Clears the paired chat and generates a fresh pairing code. Leaves the channel switched on. | Send the new code to the bot again — no need to touch the token. |
+
+The toggle is also the channel's status, not just a command: if it is off, the section says so plainly. That matters because the two states are otherwise indistinguishable from the outside — a channel that is off looks exactly like a bot that has stopped answering.
 
 ## Everything hot-reloads
 
-Saving a token, unpairing, and disabling all take effect immediately — the running channel is stopped and, if still enabled, restarted with the new configuration in the background. You never need to restart the app for a Telegram setting to take effect.
+Saving a token, unpairing, and flipping the toggle all take effect immediately — the running channel is stopped and, if still switched on, restarted with the new configuration in the background. You never need to restart the app for a Telegram setting to take effect.
 
 ## Battery exemption
 

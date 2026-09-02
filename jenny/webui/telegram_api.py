@@ -133,14 +133,37 @@ async def unpair_telegram() -> dict[str, Any]:
     return telegram_status_payload(config)
 
 
-async def disable_telegram() -> dict[str, Any]:
-    """Disabilita il canale conservando il token (riattivabile senza BotFather)."""
+async def set_telegram_enabled(enabled: bool) -> dict[str, Any]:
+    """Accende o spegne il canale conservando token e pairing.
 
-    def _apply(config: Config) -> None:
-        config.telegram.enabled = False
+    Un solo punto per i due versi, sullo stampo di ``update_ssh_settings``: il
+    campo e' un booleano, e due endpoint (``enable``/``disable``) avrebbero
+    dovuto restare d'accordo su cosa *non* toccare. Qui la risposta e' "niente
+    altro" per costruzione.
+
+    Spegnere non cancella nulla: ``bot_token``, ``paired_chat_id`` e
+    ``paired_username`` restano, quindi riaccendere non passa da BotFather ne'
+    da un nuovo pairing. E' la promessa che il vecchio ``disable_telegram``
+    faceva nel docstring senza che nessuna UI la mantenesse — non esisteva un
+    percorso che riscrivesse ``enabled = True`` senza azzerare il pairing.
+    """
+
+    def _apply(config: Config) -> bool:
+        tg = config.telegram
+        # Accendere senza token e' inerte, non un errore silenzioso da scrivere
+        # su disco: ``_init_telegram`` pretende ``enabled and bot_token``, quindi
+        # il canale non partirebbe e lo stato resterebbe a mentire.
+        if enabled and not tg.bot_token:
+            raise WebUISettingsError("telegram is not configured")
+        if tg.enabled == enabled:
+            # Niente da cambiare: il file non viene riscritto e il backup non
+            # ruota (v. ``store.mutate``).
+            return False
+        tg.enabled = enabled
+        return True
 
     config = await store.mutate(_apply)
-    logger.info("Telegram channel disabled")
+    logger.info("Telegram channel {}", "enabled" if enabled else "disabled")
     return telegram_status_payload(config)
 
 

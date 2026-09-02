@@ -6962,4 +6962,11 @@ body {
   padding: 12px; font-weight: 600;
 }
 .tg-paired .ti-circle-check { color: var(--accent); font-size: 20px; }
+/* Stessa forma della riga «Collegato», colore spento: è lo stato in cui il bot
+   non risponde, e deve leggersi come tale senza sembrare un errore. */
+.tg-disabled {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px; font-weight: 600; color: var(--text-faint);
+}
+.tg-disabled .ti-circle-off { font-size: 20px; }
 .tg-bot-link { color: var(--accent); font-weight: 600; }
