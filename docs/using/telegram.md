@@ -51,6 +51,8 @@ Once you're paired the section shows a **Channel active** toggle and an **Unpair
 
 The toggle is also the channel's status, not just a command: if it is off, the section says so plainly. That matters because the two states are otherwise indistinguishable from the outside — a channel that is off looks exactly like a bot that has stopped answering.
 
+Switching it back on does **not** make Jenny answer everything you sent while it was off. Telegram holds undelivered messages for about a day, and a channel that has just started ignores anything older than five minutes rather than replying to a pile of stale messages at once. The five-minute window is there so the opposite case still works: if the app restarts — Doze, an update, the watchdog — a message you sent seconds earlier is still picked up when it comes back.
+
 ## Everything hot-reloads
 
 Saving a token, unpairing, and flipping the toggle all take effect immediately — the running channel is stopped and, if still switched on, restarted with the new configuration in the background. You never need to restart the app for a Telegram setting to take effect.

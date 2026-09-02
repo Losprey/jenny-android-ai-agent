@@ -108,9 +108,23 @@ class WebSocketDispatcher:
         logger.info("WebSocket channel enabled")
 
     def _init_telegram(self) -> None:
-        """Crea il canale Telegram se abilitato in config con un token."""
+        """Crea il canale Telegram se abilitato in config con un token.
+
+        I due casi di uscita si loggano, e separatamente, come fa
+        ``_init_channel`` tre righe sopra per il websocket. Prima si usciva in
+        silenzio, e il costo si e' visto il 02/09/2026: un canale spento e un
+        bot che tace sono indistinguibili dall'esterno, e nei log non c'era una
+        riga che dicesse quale dei due fosse — la diagnosi e' finita a datare
+        l'``enabled`` dagli snapshot del workspace. "Spento" e "non
+        configurato" restano distinti perche' portano a due rimedi diversi: il
+        toggle nelle impostazioni, oppure il token da BotFather.
+        """
         section = self.config.telegram
-        if not (section.enabled and section.bot_token):
+        if not section.bot_token:
+            logger.info("Telegram channel not configured (no bot token)")
+            return
+        if not section.enabled:
+            logger.info("Telegram channel disabled via config (telegram.enabled=false)")
             return
         from jenny.channels.telegram import TelegramChannel
         from jenny.webui.telegram_api import record_paired

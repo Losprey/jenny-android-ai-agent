@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -35,6 +36,21 @@ from jenny.webui.metadata import WEBUI_TURN_METADATA_KEY
 _RAW_CHUNK_LIMIT = 3500
 _POLL_BACKOFF_MAX_S = 60.0
 _CHUNK_RETRY_DELAYS = (1, 2, 4)
+
+# Eta' oltre la quale un messaggio trovato in coda all'avvio non viene lavorato.
+#
+# ``get_updates`` senza offset restituisce tutto il backlog che Telegram ancora
+# trattiene (~24h di update non confermati), e ``_offset`` riparte da ``None`` a
+# ogni costruzione del canale — cioe' a ogni avvio del gateway e a ogni toggle.
+# Senza questo filtro, riaccendere il canale dopo giorni fa aprire un turno LLM
+# per ogni messaggio in coda, tutti insieme, su roba vecchia.
+#
+# Scartare *tutto* il backlog sarebbe piu' semplice ed e' sbagliato: su Android
+# le ripartenze sono ordinarie (Doze, watchdog, un aggiornamento), e un riavvio
+# tre secondi dopo che l'utente ha scritto perderebbe quel messaggio per sempre,
+# senza che niente lo dica. Cinque minuti separano i due casi che contano: il
+# messaggio scritto a cavallo di una ripartenza passa, il backlog di giorni no.
+_BACKLOG_MAX_AGE_S = 300.0
 
 # Scadenza del wakelock che copre la lavorazione di un update ricevuto.
 # Generosa rispetto al lavoro che c'è dentro (pairing, reverse-geocoding di una
@@ -140,6 +156,13 @@ class TelegramChannel:
         self._pairing_code = config.pairing_code
         self._offset: int | None = None
         self._poll_task: asyncio.Task | None = None
+        # Vero finche' stiamo smaltendo la coda che c'era *prima* di partire.
+        # Si spegne al primo update abbastanza recente (o alla prima coda
+        # vuota), e da lì non si riaccende: il filtro sull'eta' non deve poter
+        # mangiare traffico vivo per il resto della vita del processo — se
+        # l'orologio del telefono fosse sballato, un filtro permanente
+        # scarterebbe tutto in silenzio per sempre.
+        self._draining = True
         # Tentativi di pairing per chat (in-memory: si azzera al reload del
         # canale, che rigenera comunque il codice nei percorsi che contano).
         self._pair_attempts: dict[str, int] = {}
@@ -182,10 +205,20 @@ class TelegramChannel:
             try:
                 updates = await self.api.get_updates(self._offset, self.config.poll_timeout_s)
                 backoff = 1.0
+                if self._draining and not updates:
+                    # Coda vuota: non c'era backlog, o l'abbiamo finito.
+                    self._draining = False
                 for update in updates:
                     update_id = update.get("update_id")
                     if isinstance(update_id, int):
                         self._offset = update_id + 1
+                    # L'offset e' gia' avanzato, quindi uno scarto qui e'
+                    # definitivo: al prossimo giro Telegram non lo ripropone.
+                    # Deve stare *dopo* l'avanzamento, altrimenti l'update
+                    # scartato tornerebbe a ogni poll, per sempre.
+                    if self._draining and self._is_stale_backlog(update):
+                        continue
+                    self._draining = False
                     try:
                         # Il lock si prende qui, per-update, e non attorno a
                         # ``get_updates``: vedi _TELEGRAM_WAKELOCK_TIMEOUT_S.
@@ -203,6 +236,31 @@ class TelegramChannel:
                 )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _POLL_BACKOFF_MAX_S)
+
+    def _is_stale_backlog(self, update: dict[str, Any]) -> bool:
+        """Vero se l'update e' troppo vecchio per essere lavorato all'avvio.
+
+        Vale solo mentre ``_draining``, cioe' sul backlog che precede la
+        partenza del canale. Lo scarto e' loggato a WARNING con l'eta': e' una
+        perdita voluta ma non silenziosa, ed e' l'unica traccia che resta se
+        l'orologio del device fosse sballato e il filtro mordesse a torto.
+        """
+        message = update.get("message")
+        date = message.get("date") if isinstance(message, dict) else None
+        if not isinstance(date, int | float):
+            # Eta' non deducibile: si lavora. Scartare e' irreversibile, quindi
+            # il caso ambiguo non lo merita — al massimo si risponde a qualcosa
+            # di vecchio, che e' il male minore rispetto a perdere un messaggio.
+            return False
+        age = time.time() - float(date)
+        if age <= _BACKLOG_MAX_AGE_S:
+            return False
+        logger.warning(
+            "Telegram: dropping backlog message from startup queue (age {:.0f}s > {:.0f}s)",
+            age,
+            _BACKLOG_MAX_AGE_S,
+        )
+        return True
 
     # ------------------------------------------------------------------ #
     # Inbound                                                            #
