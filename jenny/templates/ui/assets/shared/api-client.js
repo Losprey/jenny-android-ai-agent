@@ -366,7 +366,15 @@ class ApiClient {
 
   async updateProvider(params) {
     const res = await this._postWithQuery('/api/settings/provider/update', params);
-    if (!res.ok) throw new Error(`Provider update failed: ${res.status}`);
+    if (!res.ok) {
+      // Il corpo dell'errore va propagato: il backend rifiuta il salvataggio
+      // spiegando *quale* file CA non ha potuto leggere e dove, e uno stato
+      // secco ("400") trasformerebbe quella spiegazione in un mistero. Le rotte
+      // dei settings rispondono in `text/plain` (`http_error`), non in JSON come
+      // quelle delle app: qui si legge il testo, non `err.error`.
+      const detail = await res.text().catch(() => '');
+      throw new Error(detail.trim() || `Provider update failed: ${res.status}`);
+    }
     return res.json();
   }
 

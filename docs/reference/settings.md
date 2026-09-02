@@ -57,7 +57,9 @@ Below the catalog, "API keys" is a plain credential keychain — it does not ind
 - A masked key hint: the first 4 and last 4 characters of the stored key, joined with `...` (e.g. `sk-a...j8f9`) — the full key is never sent back to the browser
 - Edit and Delete actions
 
-**Add provider** opens a dialog with Name, Format, API Key, and Base URL. The base URL placeholder switches automatically with the format (`https://api.openai.com/v1` for OpenAI-compatible, `https://api.anthropic.com` for Anthropic).
+**Add provider** opens a dialog with Name, Format, API Key, Base URL, and CA certificate. The base URL placeholder switches automatically with the format (`https://api.openai.com/v1` for OpenAI-compatible, `https://api.anthropic.com` for Anthropic).
+
+**CA certificate** is only for a server whose certificate is signed by your own CA: the path to a PEM file to trust *on top of* the default roots, relative to the workspace unless absolute. Installing that CA on the phone does not help — the Python runtime inside the APK has its own trust store. A path that can't be read is refused on save, naming the file, rather than being accepted and quietly ignored. Details: [Self-signed certificates](./providers.md#self-signed-certificates).
 
 The UI refuses to delete the last remaining provider ("Cannot delete the last provider") — but this check is client-side only; there is no equivalent guard on the backend, so this protection exists only inside the WebUI, not as a data-level invariant.
 

@@ -472,6 +472,13 @@ class ProviderConfig(Base):
     format: Literal["openai_compat", "anthropic"]
     api_key: str | None = Field(default=None, repr=False)
     api_base: str | None = None
+    # Percorso di un PEM di cui fidarsi *in piu'* del bundle di default, per chi
+    # ha un server con certificato firmato da una CA propria (lo store dei
+    # certificati di Android non c'entra: il runtime Python nell'APK ha il suo).
+    # Relativo = dentro il workspace. Non e' un segreto, a differenza di
+    # ``api_key``, quindi niente ``repr=False``: e' un percorso a un certificato
+    # pubblico. Semantica e casi d'errore: ``jenny/providers/tls.py``.
+    ca_bundle: str | None = None
     extra_headers: dict[str, str] | None = None
     extra_body: dict[str, Any] | None = None
     extra_query: dict[str, str] | None = None

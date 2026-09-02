@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from jenny.config.schema import Config
 from jenny.providers.base import GenerationSettings, LLMProvider
+from jenny.providers.tls import build_ssl_context
 
 
 def _make_provider_core(config: Config) -> LLMProvider:
@@ -23,6 +24,13 @@ def _make_provider_core(config: Config) -> LLMProvider:
     if not p.api_key:
         raise RuntimeError(f"Provider '{p.name}': api_key is required.")
 
+    # Un unico punto di costruzione per la fiducia TLS, prima del ramo sul
+    # formato: cosi' un ``caBundle`` rotto e' un errore solo, con un messaggio
+    # solo, e non due percorsi da tenere allineati. ``CaBundleError`` e' una
+    # ``RuntimeError``, quindi risale come il caso della chiave mancante qui
+    # sopra e i chiamanti non cambiano.
+    ssl_context = build_ssl_context(p.ca_bundle, provider_name=p.name)
+
     if backend == "anthropic":
         from jenny.providers.anthropic_provider import AnthropicProvider
 
@@ -34,6 +42,7 @@ def _make_provider_core(config: Config) -> LLMProvider:
             extra_body=p.extra_body,
             extra_query=p.extra_query,
             api_type=p.api_type,
+            ssl_context=ssl_context,
         )
     else:  # "openai_compat"
         from jenny.providers.openai_compat_provider import OpenAICompatProvider
@@ -46,6 +55,7 @@ def _make_provider_core(config: Config) -> LLMProvider:
             extra_body=p.extra_body,
             api_type=p.api_type,
             extra_query=p.extra_query,
+            ssl_context=ssl_context,
         )
 
     provider.generation = GenerationSettings(

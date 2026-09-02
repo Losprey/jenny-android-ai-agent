@@ -2376,7 +2376,10 @@ export class SettingsController {
 
   /* keepStoredKey: il provider ha già una chiave salvata, quindi un campo
      vuoto significa "lasciala com'è" e non va segnalato come errore. */
-  async _saveProvider(name, format, apiKey, apiBase, { keepStoredKey = false } = {}) {
+  async _saveProvider(
+    name, format, apiKey, apiBase,
+    { keepStoredKey = false, caBundle = '', clearCaBundle = false } = {},
+  ) {
     if (!name || (!apiKey && !keepStoredKey)) {
       showToast(i18n.t('settings.nameAndKeyRequired'), 'error');
       return;
@@ -2393,7 +2396,11 @@ export class SettingsController {
     buttons.forEach(b => { b.disabled = true; });
 
     try {
-      await api.updateProvider({ name, format, api_key: apiKey, api_base: apiBase });
+      await api.updateProvider({
+        name, format, api_key: apiKey, api_base: apiBase,
+        ca_bundle: caBundle,
+        ca_bundle_clear: clearCaBundle ? '1' : '',
+      });
     } catch (e) {
       showToast(e.message, 'error');
       return;
@@ -2575,6 +2582,12 @@ export class SettingsController {
           <input type="text" class="settings-input" id="dlg-api-base" placeholder="https://api.openai.com/v1"
             value="${isEdit ? escapeHtml(existingProvider.api_base || '') : ''}" />
         </div>
+        <div class="settings-field">
+          <label class="settings-label">${i18n.t('settings.caBundle')}</label>
+          <input type="text" class="settings-input" id="dlg-ca-bundle" placeholder="${i18n.t('settings.caBundlePlaceholder')}"
+            autocomplete="off" value="${isEdit ? escapeHtml(existingProvider.ca_bundle || '') : ''}" />
+          <span class="settings-field-hint">${i18n.t('settings.caBundleHint')}</span>
+        </div>
         <div class="oc-dialog-buttons" style="margin-top:16px">
           <button class="oc-btn oc-btn-cancel" id="dlg-provider-cancel">${i18n.t('common.cancel')}</button>
           <button class="oc-btn oc-btn-confirm" id="dlg-provider-save">${i18n.t('settings.save')}</button>
@@ -2604,9 +2617,16 @@ export class SettingsController {
       const format = dialog.querySelector('#dlg-provider-format').value;
       const apiKey = dialog.querySelector('#dlg-api-key').value.trim();
       const apiBase = dialog.querySelector('#dlg-api-base').value.trim();
+      const caBundle = dialog.querySelector('#dlg-ca-bundle').value.trim();
       // In modifica il campo vuoto vale sempre "tieni la chiave salvata":
       // il provider esiste già, non serve ridigitarla per cambiare l'URL.
-      this._saveProvider(name, format, apiKey, apiBase, { keepStoredKey: isEdit });
+      // Per la CA vale l'opposto — campo vuoto significa "nessuna CA" — ma la
+      // stringa vuota non sopravvive alla query, quindi svuotarla si dichiara.
+      this._saveProvider(name, format, apiKey, apiBase, {
+        keepStoredKey: isEdit,
+        caBundle,
+        clearCaBundle: !caBundle && !!(isEdit && existingProvider.ca_bundle),
+      });
     });
     // Il congedo (Indietro, Esc, catena della shell) passa da un `cancel`
     // annullabile: durante un salvataggio in volo lo si rifiuta, altrimenti il
