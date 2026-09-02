@@ -24,6 +24,7 @@ from jenny.providers.base import (
     LLMResponse,
     ProviderHTTPError,
     StreamTimeout,
+    describe_exc,
     tool_arguments_json_for_replay,
 )
 from jenny.providers.openai_compat_helpers import (
@@ -678,7 +679,7 @@ class OpenAICompatProvider(ResponseParsingMixin, LLMProvider):
         if isinstance(e, ProviderHTTPError):
             # Il suo messaggio nomina già status, URL e un estratto del corpo, che
             # è più di quanto direbbe il solo corpo: non va riscritto.
-            msg = f"Error calling LLM: {e}"
+            msg = f"Error calling LLM: {describe_exc(e)}"
         else:
             try:
                 body = (
@@ -689,7 +690,7 @@ class OpenAICompatProvider(ResponseParsingMixin, LLMProvider):
             except Exception:
                 body = None
             body_text = body if isinstance(body, str) else str(body) if body is not None else ""
-            msg = f"Error: {body_text.strip()[:500]}" if body_text.strip() else f"Error calling LLM: {e}"
+            msg = f"Error: {body_text.strip()[:500]}" if body_text.strip() else f"Error calling LLM: {describe_exc(e)}"
 
         headers = getattr(e, "headers", None)
         if headers is None:

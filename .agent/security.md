@@ -113,15 +113,64 @@ nomi.
 
 ### Jenny Apps server SSRF policy (intentionally more permissive)
 
-Jenny App `http` actions use a **distinct, deliberately more permissive** policy, `validate_app_server_target` (`security/network.py`), backed by `_APP_SERVER_BLOCKED_NETWORKS`. Unlike `validate_url_target`, it **allows RFC1918 private ranges** (`10/8`, `172.16/12`, `192.168/16`) and IPv6 ULA (`fc00::/7`) **by design**: an app server is a user-declared LAN device, reachable at a `server.baseUrl` that the user sees and approves in the manifest. Loopback (`127.0.0.0/8`, `::1`), link-local / cloud metadata (`169.254.0.0/16`), `0.0.0.0/8`, and CGNAT (`100.64.0.0/10`) remain blocked — so an app manifest cannot use the proxy as an authenticated bridge to the gateway's own API. Redirects are never followed, so a server cannot bounce the proxy to a blocked address.
+Jenny App `http` actions use a **distinct, deliberately more permissive** policy, `validate_app_server_target` (`security/network.py`), backed by `_APP_SERVER_BLOCKED_NETWORKS`. Unlike `validate_url_target`, it **allows RFC1918 private ranges** (`10/8`, `172.16/12`, `192.168/16`), IPv6 ULA (`fc00::/7`) **and CGNAT (`100.64.0.0/10`)** **by design**: an app server is a user-declared LAN *or tailnet* device, reachable at a `server.baseUrl` that the user sees and approves in the manifest. Loopback (`127.0.0.0/8`, `::1`), link-local / cloud metadata (`169.254.0.0/16`) and `0.0.0.0/8` remain blocked. Redirects are never followed, so a server cannot bounce the proxy to a blocked address.
 
-As a related safeguard, `server.auth` is **fail-closed**: when an app declares it needs authentication but no credential store exists yet, the action is refused with a 501 rather than being sent unauthenticated (`apps/http.py`).
+**CGNAT was blocked until Sept 2026, and the re-evaluation the Rule below asks for is this.** The old justification — quoted verbatim — was that keeping it blocked meant "an app manifest cannot use the proxy as an authenticated bridge to the gateway's own API". That is the argument for blocking **loopback**, which still is blocked; a CGNAT address does not reach the gateway. The two had been flattened into one sentence, so the range was carrying a reason that was not about it.
 
-**Rule**: Keep the two policies separate. Widening the app-server allowlist further (or letting it follow redirects) requires re-evaluating the LAN-device threat model; do not route general agent web fetches through `validate_app_server_target`.
+Measured consequence of the old state: a Jenny App could never reach the user's own Tailscale server. The only documented escape hatch was `security.ssrfWhitelist`, which is **global** — using it to let one app talk to one server would have opened CGNAT to `web_fetch` and to every target the model picks. That is a strictly worse trade than a narrow permission in the one policy that needs it, and it is the same trade already made for SSH (see below).
+
+The criterion that actually separates the three policies on CGNAT is **who chooses the address**: an SSH host is typed by the user in Settings, a `server.baseUrl` is declared by the user in a manifest they can read, and in `web_fetch` the address is chosen by the model. The first two get CGNAT; the third does not. Fixed by `test_tailscale_allowed_where_the_user_names_the_target_never_where_the_model_does` (`tests/security/test_ssrf_extended.py`), which asserts all three with an **empty** whitelist — so a future regression to the global-whitelist shortcut fails the test.
+
+`server.auth` is **fail-closed twice over**: `_parse_manifest` (`apps/manifest.py`) rejects a manifest declaring it, so the app loads as broken with the remedy named, and `execute_http_action` (`apps/http.py`) still refuses with 501 if such a manifest reaches it by another route. Before Sept 2026 only the 501 existed, and the app-creator skill actively *instructed* writing `"auth": {"secretRef": ...}` — so an app could validate clean and ship with every http action dead. That advice is withdrawn in `skills/app-creator/SKILL.md`.
+
+**Rule**: Keep the three policies separate, and argue any widening from *who names the target*, not from how a range feels. Letting the app-server policy follow redirects, or routing general agent web fetches through `validate_app_server_target`, both still require a fresh threat-model pass.
+
+### Jenny App external-view proxy (loopback listener)
+
+An app declaring `view: {"kind": "external"}` gets its screen from its own server instead of
+`app/index.html`, served through `apps/proxy.py::AppViewProxy`: an `asyncio` listener on
+`127.0.0.1:<ephemeral>` that forwards to `server.baseUrl` at byte level. It exists because the
+APK's `network_security_config.xml` permits cleartext only to loopback, so a WebView framing a
+non-loopback `http://` gets `ERR_CLEARTEXT_NOT_PERMITTED` before a socket opens — going through
+loopback sidesteps that without widening the policy or baking a personal hostname into the APK.
+
+What bounds the surface:
+
+- **Bind is `127.0.0.1` only**, never an external interface (fixed by `test_binds_only_on_loopback`).
+- **One fixed upstream**, validated once at `start()` with `validate_app_server_target`. The proxy
+  is not steerable to another address, and `test_start_actually_consults_the_ssrf_gate` exists so
+  that stubbing the gate in the transport tests cannot hide its removal.
+- **Capability**: the first navigation must present a 128-bit secret in the path; the proxy 302s
+  and moves it into a cookie, so the remote page's root-absolute paths keep working. No cookie and
+  no prefix → 403. This is load-bearing, because `127.0.0.1:<port>` is reachable by **any** app on
+  the phone and an ephemeral port is scannable in seconds.
+  - Known wart, deliberately accepted: cookies are per-host and **ignore the port**, so the
+    browser sends it to anything on `127.0.0.1`. In practice that is this proxy and the gateway
+    (both ours) — and it is why `_rebuild_head` **strips** the cookie from the forwarded request:
+    the user's own server must not see it either.
+- **Lifetime**: closed by `.../view/close` when the UI closes the view, with an idle timeout as
+  the backstop. The listeners live in the gateway process and die with it; there is no container
+  shutdown hook.
+- Redirects are not resolved by the proxy — they are streamed to the browser, which resolves them
+  against the proxy origin, so a redirect cannot move the tunnel to another host.
+
+**The sandbox is wider here, and the reason is the origin, not trust.** A normal app is served
+from the *gateway's* origin, so `allow-same-origin` would hand it the SPA's DOM, `localStorage`
+and the gateway API with the token — hence `sandbox="allow-scripts"` and nothing else. An external
+view sits on `http://127.0.0.1:<ephemeral>`: different port → **different origin**, so
+`allow-same-origin` returns only the proxy's own origin and the same-origin policy still keeps it
+out of the SPA. Without it the page is effectively dead (opaque origin: no cookies, `localStorage`
+throws, its own fetches carry `Origin: null`). This is also why an external view gets its own
+overlay rather than being nested inside the app frame: **sandbox flags are inherited by nested
+browsing contexts**, so nesting would restore the opaque origin.
+
+**Rule**: The capability check and the loopback bind are the two things holding this up — do not
+"simplify" either. Serving an external view from the gateway's own origin, or adding
+`allow-same-origin` to the normal app frame, both defeat the isolation entirely.
 
 ### SSH target policy (a third one, wider still)
 
-`validate_ssh_target` (`security/network.py`), backed by `_SSH_BLOCKED_NETWORKS`, allows RFC1918, IPv6 ULA **and** CGNAT (`100.64.0.0/10`), blocking only `0.0.0.0/8`, loopback and link-local/metadata. CGNAT is allowed here rather than through `configure_ssrf_whitelist` on purpose: the whitelist is global, so opening it for Tailscale would also open CGNAT to `web_fetch` and to Jenny Apps — a narrow permission in one policy beats a wide one across all three. What backs the extra room is that an SSH host is user-typed in Settings and host-key pinned before any connection, not that SSH is inherently safer.
+`validate_ssh_target` (`security/network.py`), backed by `_SSH_BLOCKED_NETWORKS`, allows RFC1918, IPv6 ULA **and** CGNAT (`100.64.0.0/10`), blocking only `0.0.0.0/8`, loopback and link-local/metadata. CGNAT is allowed here rather than through `configure_ssrf_whitelist` on purpose: the whitelist is global, so opening it for Tailscale would also open CGNAT to `web_fetch`, where the model picks the address — a narrow permission in each policy that needs it beats a wide one across all three. (The Jenny Apps policy now allows CGNAT on the same grounds, on its own; it did not until Sept 2026.) What backs the extra room is that an SSH host is user-typed in Settings and host-key pinned before any connection, not that SSH is inherently safer.
 
 **Rule**: Loopback stays blocked in all three policies — it is the phone itself, and the gateway's own API lives there.
 

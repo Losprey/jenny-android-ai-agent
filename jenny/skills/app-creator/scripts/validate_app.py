@@ -109,14 +109,14 @@ def find_raw_secrets(node, path, errors):
     if isinstance(node, dict):
         for key, value in node.items():
             child = f"{path}.{key}" if path else key
-            if (
-                key.lower() in SECRET_KEYS
-                and key != "secretRef"
-                and isinstance(value, str)
-                and value.strip()
-            ):
+            # Nessuna eccezione per `secretRef`: non e' piu' un campo ammesso
+            # (v. il rifiuto di server.auth sopra), e "secretref" non e'
+            # comunque in SECRET_KEYS — la condizione non scattava mai e
+            # lasciava credere che quella forma fosse ancora sanzionata.
+            if key.lower() in SECRET_KEYS and isinstance(value, str) and value.strip():
                 errors.append(
-                    f"{child}: looks like a raw secret — use \"auth\": {{\"secretRef\": \"<name>\"}} instead"
+                    f"{child}: looks like a raw secret — an app server must not need credentials "
+                    "(app-server auth is not supported); point baseUrl at an open endpoint"
                 )
             find_raw_secrets(value, child, errors)
     elif isinstance(node, list):
@@ -159,20 +159,58 @@ def validate_app(app_dir):
             has_server = True
             if not server["baseUrl"].startswith(("http://", "https://")):
                 errors.append("app.json: server.baseUrl must start with http:// or https://")
+            if server.get("auth") is not None:
+                # Il gateway non ha un credential store e l'esecutore http e'
+                # fail-closed: un'app con `auth` si apre e ha tutte le azioni
+                # http morte con un 501. Va detto qui, mentre il manifest si
+                # scrive, non scoperto tentando un'azione.
+                errors.append(
+                    "app.json: server.auth is declared but app-server credentials are "
+                    "not supported yet — remove the 'auth' block (every http action "
+                    "would be refused with 501)"
+                )
 
     find_raw_secrets(manifest, "app.json", errors)
 
-    actions = manifest.get("actions")
-    if not isinstance(actions, list) or not actions:
-        errors.append("app.json: 'actions' must be a non-empty array")
-    else:
+    actions = manifest.get("actions") or []
+    if not isinstance(actions, list):
+        errors.append("app.json: 'actions' must be an array")
+    elif actions:
         names = [validate_action(a, i, has_server, errors, warnings) for i, a in enumerate(actions)]
         dupes = {n for n in names if n and names.count(n) > 1}
         if dupes:
             errors.append(f"app.json: duplicate action names: {sorted(dupes)}")
 
+    view = manifest.get("view")
+    external_view = False
+    if view is not None:
+        if not isinstance(view, dict):
+            errors.append("app.json: 'view' must be an object")
+        elif view.get("kind") != "external":
+            errors.append(
+                f"app.json: view.kind must be 'external' (got {view.get('kind')!r})"
+            )
+        else:
+            external_view = True
+            if not has_server:
+                errors.append("app.json: view.kind 'external' requires a 'server.baseUrl'")
+            elif isinstance(server, dict) and str(server.get("baseUrl", "")).startswith("https://"):
+                warnings.append(
+                    "view.kind 'external' with an https baseUrl: the loopback proxy is only "
+                    "needed to get around the cleartext policy — frame the URL directly"
+                )
+
     index_path = app_dir / "app" / "index.html"
-    if not index_path.is_file():
+    if external_view:
+        # Lo schermo di questa app e' la UI del suo server, servita dal proxy su
+        # loopback: non c'e' un `app/index.html` da scrivere, e pretenderlo
+        # avrebbe costretto a un file finto.
+        if index_path.is_file():
+            warnings.append(
+                "app/index.html is present but view.kind is 'external' — it will never be "
+                "shown; delete it or drop the 'view' block"
+            )
+    elif not index_path.is_file():
         errors.append("app/index.html is missing (the UI lives in the app/ subfolder)")
     else:
         html = index_path.read_text(encoding="utf-8", errors="replace")

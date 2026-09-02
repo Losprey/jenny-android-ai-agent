@@ -93,6 +93,13 @@ export class AppsController {
     // Bridge from sandboxed app iframes (opaque origin → origin check is
     // meaningless; we validate the source window instead).
     window.addEventListener('message', e => this._onAppMessage(e));
+    /* Un iframe che non carica non dice niente al JS che lo contiene
+       (cross-origin: `onerror` non scatta, `contentDocument` è inaccessibile).
+       L'unico che lo vede è il WebViewClient della shell, che ce lo rigira qui —
+       v. MainActivity.reportSubframeError. Senza questo, una app il cui
+       contenuto non carica è un riquadro bianco e nient'altro, per qualunque
+       causa. */
+    window.addEventListener('jenny-subframe-error', e => this._onSubframeError(e));
     /* Agent-side storage mutations → refresh the open app iframe.
 
        Stream non filtrato per `chat_id`, **e deve restare così**: questi due
@@ -1065,6 +1072,12 @@ export class AppsController {
     if (!api.getSecret()) {
       try { await api.bootstrap(); } catch { return; }
     }
+
+    if (app.view_kind === 'external') {
+      await this._openExternalView(slug, app);
+      return;
+    }
+
     const t = currentTheme();
     const lang = document.documentElement.lang || 'it';
     const src = `/apps/${encodeURIComponent(slug)}/index.html`
@@ -1125,12 +1138,110 @@ export class AppsController {
      le schermate nella history con `pushState`, ognuna lasciava una entry nella
      joint session history del WebView che nemmeno `iframe.remove()` toglieva —
      e dopo la ✕ restavano pressioni di Indietro morte. */
+  /* Vista esterna: lo schermo dell'app è la UI del suo server, servita dal
+     proxy su loopback (jenny/apps/proxy.py). Esiste perché la policy di rete
+     dell'APK rifiuta un iframe verso un `http://` non-loopback, quindi
+     "incornicia il mio server" non era esprimibile in nessun modo. */
+  async _openExternalView(slug, app) {
+    let url;
+    try {
+      const res = await fetch(`/api/webui/apps/${encodeURIComponent(slug)}/view`, {
+        headers: { 'Authorization': `Bearer ${api.getSecret()}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.url) throw new Error(body.error || `HTTP ${res.status}`);
+      url = body.url;
+    } catch (e) {
+      showToast(i18n.t('apps.viewProxyFailed', { error: String(e.message || e) }), 'error');
+      return;
+    }
+
+    this.closeApp();
+    const overlay = document.createElement('div');
+    overlay.className = 'app-frame-overlay';
+    overlay.innerHTML = `
+      <div class="app-frame-header">
+        <span class="app-frame-title">${escapeHtml(app.name || slug)}</span>
+        <button class="app-frame-close" title="${i18n.t('apps.close')}"><i class="ti ti-x"></i></button>
+      </div>
+    `;
+    const iframe = document.createElement('iframe');
+    /* Sandbox più largo che per una app normale, e la differenza è l'ORIGINE,
+       non la fiducia.
+
+       Una app normale è servita DALL'ORIGINE DEL GATEWAY: lasciarle la sua
+       origine naturale (`allow-same-origin`) le darebbe il DOM e il
+       localStorage della SPA e l'API del gateway col token. Per quello lì il
+       sandbox è `allow-scripts` e basta.
+
+       Una vista esterna sta su `http://127.0.0.1:<porta effimera>`: porta
+       diversa → **origine diversa** dal gateway. `allow-same-origin` le
+       restituisce la sua origine, che è quella del proxy e di nessun altro, e
+       la same-origin policy del browser la tiene comunque fuori dalla SPA.
+
+       Senza `allow-same-origin` invece l'origine è opaca e la pagina remota è
+       di fatto morta: cookie bloccati, `localStorage` che solleva, e i suoi
+       stessi `fetch` con `Origin: null`. È anche il motivo per cui questa vista
+       NON può essere un iframe annidato dentro l'app-frame sandboxata: i flag
+       di sandbox si ereditano nei frame figli. */
+    iframe.setAttribute(
+      'sandbox',
+      'allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
+    );
+    iframe.src = url;
+    overlay.appendChild(iframe);
+    overlay.querySelector('.app-frame-close').addEventListener('click', () => this.closeApp());
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    this._openApp = { slug, overlay, iframe, depth: 1, external: true };
+  }
+
   closeApp() {
     const open = this._openApp;
     if (!open) return;
     this._openApp = null;
     open.overlay.classList.remove('visible');
     setTimeout(() => open.overlay.remove(), 200);
+    /* Il listener del proxy vive quanto la vista: chiuderlo qui è la via
+       normale. Se questo fetch non arriva (processo ucciso, rete interna giù)
+       ci pensa l'idle timeout lato Python — non resta aperto per sempre. */
+    if (open.external) {
+      fetch(`/api/webui/apps/${encodeURIComponent(open.slug)}/view/close`, {
+        headers: { 'Authorization': `Bearer ${api.getSecret()}` },
+      }).catch(() => {});
+    }
+  }
+
+  /* Mostra nella UI il fallimento di un sub-frame dell'app aperta.
+     Chiamato dalla shell Android (MainActivity.reportSubframeError), che è il
+     solo punto del sistema che lo sappia. */
+  _onSubframeError(event) {
+    const open = this._openApp;
+    if (!open) return;
+    const d = event?.detail;
+    if (!d || typeof d !== 'object') return;
+
+    /* `ERR_CLEARTEXT_NOT_PERMITTED` merita il suo messaggio: la causa non è
+       nell'app né nella rete, è la network security config dell'APK, che
+       permette il cleartext solo verso il gateway. Detto come errore generico
+       manda a cercare il guasto dove non è — che è esattamente quello che è
+       successo. */
+    const cleartext = String(d.description || '').includes('ERR_CLEARTEXT_NOT_PERMITTED');
+    const host = String(d.host || d.url || '');
+    const message = cleartext
+      ? i18n.t('apps.frameCleartextBlocked', { host })
+      : i18n.t('apps.frameLoadFailed', {
+          host, reason: String(d.description || d.errorCode || ''),
+        });
+
+    let banner = open.overlay.querySelector('.app-frame-error');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.className = 'app-frame-error';
+      open.overlay.querySelector('.app-frame-header')?.insertAdjacentElement('afterend', banner);
+    }
+    banner.innerHTML = `<i class="ti ti-alert-triangle"></i><span>${escapeHtml(message)}</span>`;
   }
 
   notifyAppDataChanged(slug) {

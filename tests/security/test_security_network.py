@@ -220,13 +220,29 @@ def test_app_server_allows_private_lan(ip):
         assert ok, f"App policy should allow {ip}, got: {err}"
 
 
+def test_app_server_allows_tailscale_without_the_global_whitelist():
+    """CGNAT ammesso dalla policy stessa, con whitelist VUOTA.
+
+    Il punto e' proprio la whitelist vuota: prima l'unico modo di far parlare
+    un'app col server dell'utente su Tailscale era metterci 100.64.0.0/10, che
+    e' globale e apriva il CGNAT anche a `web_fetch`. Se un giorno questo test
+    passasse solo con la whitelist popolata, il permesso sarebbe tornato largo.
+    """
+    configure_ssrf_whitelist([])
+    with patch(
+        "jenny.security.network.socket.getaddrinfo",
+        _fake_resolve("hps", ["100.107.97.244"]),
+    ):
+        ok, err = validate_app_server_target("http://hps:8091/")
+        assert ok, f"App policy should allow a Tailscale address, got: {err}"
+
+
 @pytest.mark.parametrize(
     "ip,label",
     [
         ("127.0.0.1", "loopback (gateway self-bridge)"),
         ("169.254.169.254", "link-local / metadata"),
         ("0.0.0.1", "0.0.0.0/8"),
-        ("100.100.1.1", "CGNAT"),
     ],
 )
 def test_app_server_still_blocks_dangerous_ranges(ip, label):
@@ -241,13 +257,18 @@ def test_app_server_blocks_ipv6_loopback():
         assert not ok
 
 
-def test_app_server_cgnat_whitelist_still_honored():
-    """The existing ssrf whitelist (e.g. Tailscale) applies to app servers too."""
-    configure_ssrf_whitelist(["100.64.0.0/10"])
+def test_app_server_whitelist_still_honored():
+    """La ssrf whitelist resta applicata anche alla policy delle app.
+
+    Guardava il CGNAT, che ora la policy ammette da se': misurarlo li' non
+    proverebbe piu' niente (passerebbe con o senza whitelist). Spostato su una
+    fascia che la policy blocca davvero, cioe' link-local.
+    """
+    configure_ssrf_whitelist(["169.254.0.0/16"])
     try:
-        with patch("jenny.security.network.socket.getaddrinfo", _fake_resolve("ts.lan", ["100.100.1.1"])):
-            ok, err = validate_app_server_target("http://ts.lan/x")
-            assert ok, f"Whitelisted CGNAT should be allowed, got: {err}"
+        with patch("jenny.security.network.socket.getaddrinfo", _fake_resolve("ll.lan", ["169.254.10.1"])):
+            ok, err = validate_app_server_target("http://ll.lan/x")
+            assert ok, f"Whitelisted range should be allowed, got: {err}"
     finally:
         configure_ssrf_whitelist([])
 

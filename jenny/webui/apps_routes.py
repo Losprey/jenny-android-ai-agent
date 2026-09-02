@@ -49,6 +49,13 @@ class AppsRoutes:
         self._check_api_token = check_api_token
         self._get_workspace_root = get_workspace_root
         self._log = log
+        # slug -> AppViewProxy vivo. Un solo proxy per app: riaprire la stessa
+        # vista riusa il listener invece di lasciarne uno per apertura.
+        #
+        # Non c'e' un hook di shutdown nel container che li chiuda: i listener
+        # sono nel processo del gateway e muoiono con lui, e per il caso in cui
+        # la UI non mandi la chiusura c'e' l'idle timeout del proxy.
+        self._view_proxies: dict[str, Any] = {}
 
     def _check_apps_enabled(self) -> Response | None:
         """Verifica ``config.apps.enabled``, fail-**closed**.
@@ -95,6 +102,12 @@ class AppsRoutes:
         m = re.match(r"^/api/webui/apps/([^/]+)/delete$", path)
         if m:
             return self._delete(request, m.group(1))
+        m = re.match(r"^/api/webui/apps/([^/]+)/view$", path)
+        if m:
+            return await self._view(request, m.group(1))
+        m = re.match(r"^/api/webui/apps/([^/]+)/view/close$", path)
+        if m:
+            return await self._view_close(request, m.group(1))
         m = re.match(r"^/api/apps/([^/]+)/actions/([^/]+)$", path)
         if m:
             return await self._action(request, m.group(1), m.group(2))
@@ -130,6 +143,76 @@ class AppsRoutes:
         except Exception as e:
             self._log.warning("app delete {} failed: {}", slug, e)
             return http_error(500, "internal error")
+
+    def _resolve_view_app(self, raw_slug: str) -> tuple[str, str] | Response:
+        """``(slug, base_url)`` per una vista esterna, o il ``Response`` d'errore."""
+        slug = unquote(raw_slug)
+        if not slug or APP_SLUG_RE.match(slug) is None:
+            return http_error(400, "invalid app slug")
+        from jenny.apps.manifest import find_app
+
+        app = find_app(self._get_workspace_root(), slug)
+        if app is None:
+            return http_error(404, "app not found")
+        if app.broken or app.manifest is None:
+            return http_error(409, f"app is broken: {app.error}")
+        if app.manifest.view_kind != "external":
+            return http_error(400, "app has no external view")
+        if not app.manifest.server_base_url:
+            # _parse_manifest lo garantisce per view.kind 'external'; qui e' per
+            # il type checker e per il caso in cui quella regola cambi.
+            return http_error(409, "external view without a server.baseUrl")
+        return slug, app.manifest.server_base_url
+
+    async def _view(self, request: WsRequest, raw_slug: str) -> Response:
+        """Apre (o riusa) il proxy su loopback e torna l'URL d'ingresso.
+
+        L'URL torna alla SPA, che lo incornicia. Non e' un redirect: la SPA deve
+        vedere l'URL per montare l'iframe con il sandbox giusto (v. openApp).
+        """
+        if not self._check_api_token(request):
+            return http_error(401, "Unauthorized")
+        disabled = self._check_apps_enabled()
+        if disabled is not None:
+            return disabled
+        resolved = self._resolve_view_app(raw_slug)
+        if isinstance(resolved, Response):
+            return resolved
+        slug, base_url = resolved
+
+        existing = self._view_proxies.get(slug)
+        if existing is not None and existing.base_url == base_url:
+            return http_json_response({"url": existing.entry_url}, extra_headers=APP_CORS_HEADERS)
+        if existing is not None:
+            # Il baseUrl e' cambiato sotto: il vecchio listener punta altrove.
+            await existing.close()
+            self._view_proxies.pop(slug, None)
+
+        from jenny.apps.proxy import AppViewProxy, AppViewProxyError
+
+        try:
+            proxy = AppViewProxy(slug, base_url)
+            url = await proxy.start()
+        except AppViewProxyError as exc:
+            return http_json_response({"ok": False, "error": str(exc)}, status=403,
+                                      extra_headers=APP_CORS_HEADERS)
+        except OSError as exc:
+            self._log.warning("app view proxy for {} failed to bind: {}", slug, exc)
+            return http_error(500, "internal error")
+        self._view_proxies[slug] = proxy
+        return http_json_response({"url": url}, extra_headers=APP_CORS_HEADERS)
+
+    async def _view_close(self, request: WsRequest, raw_slug: str) -> Response:
+        """Chiude il listener quando la UI chiude la vista."""
+        if not self._check_api_token(request):
+            return http_error(401, "Unauthorized")
+        slug = unquote(raw_slug)
+        if not slug or APP_SLUG_RE.match(slug) is None:
+            return http_error(400, "invalid app slug")
+        proxy = self._view_proxies.pop(slug, None)
+        if proxy is not None:
+            await proxy.close()
+        return http_json_response({"ok": True}, extra_headers=APP_CORS_HEADERS)
 
     async def _action(self, request: WsRequest, raw_slug: str, raw_action: str) -> Response:
         def respond(payload: dict, status: int) -> Response:

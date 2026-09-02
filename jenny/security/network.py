@@ -23,11 +23,28 @@ _BLOCKED_NETWORKS = [
 # Blocklist for Jenny App `http` actions: app servers are user-declared LAN
 # devices, so private ranges (RFC1918, IPv6 ULA) are allowed. Loopback stays
 # blocked so an app manifest can't use the proxy as an authenticated bridge to
-# the gateway's own API; link-local/metadata and CGNAT stay blocked too
-# (CGNAT is exemptable via the existing ssrf whitelist, e.g. for Tailscale).
+# the gateway's own API; link-local/metadata and 0.0.0.0/8 stay blocked because
+# they are never a user's server.
+#
+# CGNAT (100.64.0.0/10) is ALLOWED here, same as in _SSH_BLOCKED_NETWORKS and
+# for the same reason: it is the range Tailscale assigns its nodes, and reaching
+# one's own server over Tailscale from a phone on 4G is the normal case, not an
+# exotic one. It used to be blocked, with the escape hatch documented as
+# "exemptable via the existing ssrf whitelist" — but that whitelist is *global*,
+# so opening it to let one app talk to one's own server would have opened CGNAT
+# to `web_fetch` and to every target the model picks. A narrow permission in the
+# policy that needs it beats a wide one across all three.
+#
+# The stated justification for blocking it was that an app manifest must not use
+# the proxy as a bridge to the gateway's own API — but that is the argument for
+# blocking *loopback*, which still is: a CGNAT address does not reach the
+# gateway. The two had been flattened into one sentence.
+#
+# What still stands guard: loopback and link-local blocked, redirects never
+# followed (see apps/http.py), the target declared by the user in a manifest
+# they can read, and only the app's own typed actions able to call it.
 _APP_SERVER_BLOCKED_NETWORKS = [
     ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("100.64.0.0/10"),   # carrier-grade NAT
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),   # link-local / cloud metadata
     ipaddress.ip_network("::1/128"),
@@ -150,10 +167,11 @@ def validate_url_target(url: str, *, allow_loopback: bool = False) -> tuple[bool
 def validate_app_server_target(url: str) -> tuple[bool, str]:
     """Validate a Jenny App server URL (``server.baseUrl`` targets only).
 
-    Unlike :func:`validate_url_target`, RFC1918 and IPv6 ULA ranges are
-    allowed — app servers are user-declared LAN devices. Loopback, link-local
-    metadata, 0.0.0.0/8 and CGNAT stay blocked (see
-    ``_APP_SERVER_BLOCKED_NETWORKS``).
+    Unlike :func:`validate_url_target`, RFC1918, IPv6 ULA **and** CGNAT
+    (Tailscale) are allowed — app servers are user-declared LAN or tailnet
+    devices. Loopback, link-local metadata and 0.0.0.0/8 stay blocked (see
+    ``_APP_SERVER_BLOCKED_NETWORKS`` for why CGNAT is permitted here rather
+    than through the global ssrf whitelist).
 
     Returns (ok, error_message).  When ok is True, error_message is empty.
     """

@@ -272,3 +272,129 @@ class TestAppsGateFailsClosed:
 
         assert response.status_code == 503
         assert b"disabled" in response.body
+
+
+VIEW_MANIFEST = {
+    "name": "Telecomando",
+    "description": "Il telecomando di hps",
+    "icon": "ti-device-tv",
+    "server": {"baseUrl": "http://hps:8091"},
+    "view": {"kind": "external"},
+}
+
+
+def _add_view_app(workspace: Path, slug: str = "telecomando", manifest=VIEW_MANIFEST) -> None:
+    """Una app a vista esterna: nessun app/index.html, e' il punto."""
+    app_dir = workspace / "apps" / slug
+    app_dir.mkdir(parents=True, exist_ok=True)
+    (app_dir / "app.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+class TestExternalView:
+    """La route che apre il proxy su loopback per una vista esterna.
+
+    Il proxy vero e proprio ha i suoi test in ``tests/apps/test_proxy.py``; qui
+    si guarda solo il contratto della route e il ciclo di vita del listener.
+    """
+
+    async def test_view_returns_a_loopback_url(self, tmp_path):
+        handler = _make_handler(tmp_path)
+        workspace = _make_workspace(tmp_path)
+        _add_view_app(workspace)
+        with patch.object(handler, "_get_workspace_root", return_value=workspace), \
+             patch("jenny.apps.proxy.validate_app_server_target", return_value=(True, "")):
+            response = await handler.apps_routes._view(
+                _make_request("/api/webui/apps/telecomando/view"), "telecomando")
+            try:
+                assert response.status_code == 200
+                url = _body(response)["url"]
+                # L'URL deve stare su loopback: e' l'intero motivo del proxy —
+                # la policy cleartext dell'APK permette solo questo.
+                assert url.startswith("http://127.0.0.1:")
+                # ...e portare la capability nel path della prima navigazione.
+                assert url.rstrip("/").rsplit("/", 1)[-1]
+            finally:
+                await handler.apps_routes._view_close(
+                    _make_request("/api/webui/apps/telecomando/view/close"), "telecomando")
+
+    async def test_reopening_reuses_the_same_listener(self, tmp_path):
+        """Riaprire non deve lasciare un listener per apertura."""
+        handler = _make_handler(tmp_path)
+        workspace = _make_workspace(tmp_path)
+        _add_view_app(workspace)
+        with patch.object(handler, "_get_workspace_root", return_value=workspace), \
+             patch("jenny.apps.proxy.validate_app_server_target", return_value=(True, "")):
+            try:
+                first = _body(await handler.apps_routes._view(
+                    _make_request("/api/webui/apps/telecomando/view"), "telecomando"))["url"]
+                second = _body(await handler.apps_routes._view(
+                    _make_request("/api/webui/apps/telecomando/view"), "telecomando"))["url"]
+                assert first == second
+                assert len(handler.apps_routes._view_proxies) == 1
+            finally:
+                await handler.apps_routes._view_close(
+                    _make_request("/api/webui/apps/telecomando/view/close"), "telecomando")
+
+    async def test_close_drops_the_proxy(self, tmp_path):
+        handler = _make_handler(tmp_path)
+        workspace = _make_workspace(tmp_path)
+        _add_view_app(workspace)
+        with patch.object(handler, "_get_workspace_root", return_value=workspace), \
+             patch("jenny.apps.proxy.validate_app_server_target", return_value=(True, "")):
+            await handler.apps_routes._view(
+                _make_request("/api/webui/apps/telecomando/view"), "telecomando")
+            assert handler.apps_routes._view_proxies
+            response = await handler.apps_routes._view_close(
+                _make_request("/api/webui/apps/telecomando/view/close"), "telecomando")
+        assert response.status_code == 200
+        assert handler.apps_routes._view_proxies == {}
+
+    async def test_a_normal_app_has_no_external_view(self, tmp_path):
+        """`note` non dichiara `view`: la route non deve aprirle un proxy."""
+        handler = _make_handler(tmp_path)
+        workspace = _make_workspace(tmp_path)
+        with patch.object(handler, "_get_workspace_root", return_value=workspace):
+            response = await handler.apps_routes._view(
+                _make_request("/api/webui/apps/note/view"), "note")
+        assert response.status_code == 400
+        assert handler.apps_routes._view_proxies == {}
+
+    async def test_blocked_target_is_refused_not_bound(self, tmp_path):
+        """Il cancello SSRF vero: nessun listener per un target rifiutato."""
+        handler = _make_handler(tmp_path)
+        workspace = _make_workspace(tmp_path)
+        _add_view_app(workspace, "loop", {
+            **VIEW_MANIFEST, "server": {"baseUrl": "http://127.0.0.1:9"},
+        })
+        with patch.object(handler, "_get_workspace_root", return_value=workspace):
+            response = await handler.apps_routes._view(
+                _make_request("/api/webui/apps/loop/view"), "loop")
+        assert response.status_code == 403
+        assert b"blocked server target" in response.body
+        assert handler.apps_routes._view_proxies == {}
+
+    async def test_view_requires_a_token(self, tmp_path):
+        handler = _make_handler(tmp_path)
+        response = await handler.apps_routes._view(
+            _make_request("/api/webui/apps/telecomando/view", token=None), "telecomando")
+        assert response.status_code == 401
+
+    async def test_view_is_routed_by_dispatch(self, tmp_path):
+        """Le due route devono essere raggiungibili, non solo esistere."""
+        handler = _make_handler(tmp_path)
+        workspace = _make_workspace(tmp_path)
+        _add_view_app(workspace)
+        with patch.object(handler, "_get_workspace_root", return_value=workspace), \
+             patch("jenny.apps.proxy.validate_app_server_target", return_value=(True, "")):
+            try:
+                opened = await handler.apps_routes.dispatch(
+                    _make_request("/api/webui/apps/telecomando/view"),
+                    "/api/webui/apps/telecomando/view")
+                assert opened is not None and opened.status_code == 200
+                closed = await handler.apps_routes.dispatch(
+                    _make_request("/api/webui/apps/telecomando/view/close"),
+                    "/api/webui/apps/telecomando/view/close")
+                assert closed is not None and closed.status_code == 200
+            finally:
+                await handler.apps_routes._view_close(
+                    _make_request("/api/webui/apps/telecomando/view/close"), "telecomando")

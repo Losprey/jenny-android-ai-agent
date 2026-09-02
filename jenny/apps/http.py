@@ -69,6 +69,14 @@ async def execute_http_action(
         # (vecchio comportamento) era una violazione silenziosa del contratto:
         # o si perde la richiesta o si prende un 401. Rifiutiamo in modo
         # esplicito finché il secrets store non sarà implementato (roadmap).
+        #
+        # Da settembre 2026 ``_parse_manifest`` rifiuta ``server.auth`` al
+        # caricamento, quindi per la via normale (``load_app`` → ``find_app``)
+        # qui non si arriva più. Il controllo resta perché questa funzione
+        # accetta un ``AppManifest`` qualunque — costruito a mano, o prodotto da
+        # un parser che un domani riammettesse il campo: è l'ultima linea, e
+        # perderla renderebbe il rifiuto una proprietà del validatore invece che
+        # dell'esecutore.
         logger.warning(
             "App '{}' declares server.auth but no credential store is configured; "
             "refusing the action (fail-closed).",

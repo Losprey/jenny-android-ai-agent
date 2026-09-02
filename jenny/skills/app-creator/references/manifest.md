@@ -11,8 +11,20 @@ Contents: [app.json fields](#appjson-fields) · [storage actions](#storage-actio
 | `name` | yes | Display name shown in the Jenny Apps grid |
 | `description` | yes | One line: what the app does (shown in the grid and to the agent) |
 | `icon` | no | Tabler icon name (e.g. `ti-plant`); defaults to `ti-apps` |
-| `server` | no | Only for apps backed by an external API: `{"baseUrl": "...", "auth": {"secretRef": "..."}}` |
-| `actions` | yes | Array of typed actions (the contract — see below) |
+| `server` | no | Only for apps backed by an external API: `{"baseUrl": "..."}` |
+| `actions` | no | Array of typed actions (the contract — see below). Omit it for a display-only app |
+| `view` | no | `{"kind": "external"}` — the app's screen is its server's UI, not `app/index.html` |
+
+> **Never declare `server.auth`.** There is no credential store yet, and the http executor is
+> fail-closed: with `auth` present, **every** http action is refused with 501, and since
+> Sept 2026 the app is rejected at load as broken. This table used to show
+> `"auth": {"secretRef": "..."}` as part of `server`, which is how a real app came to declare
+> it and ship dead. Point the `baseUrl` at an endpoint that needs no credentials.
+
+> **`actions` is optional.** An app whose only job is to draw a screen has nothing
+> agent-facing to declare — omit `actions` entirely. Do **not** invent a filler action (a
+> health-check ping, a no-op query) to satisfy the schema: that happened, and it produced an
+> app with a permanently broken tool the user never asked for.
 
 Fields common to every action:
 
@@ -84,8 +96,8 @@ notes.forEach(...)
 
 ## http actions
 
-Mapped onto calls to `server.baseUrl`, executed through the gateway proxy (SSRF-checked,
-auth injected from the secrets store — see Secrets in SKILL.md).
+Mapped onto calls to `server.baseUrl`, executed through the gateway proxy (SSRF-checked; no
+credentials are ever attached — see Secrets in SKILL.md).
 
 | Extra field | Required | Notes |
 |-------------|----------|-------|
@@ -110,6 +122,34 @@ status, `data` is the server's JSON, parsed). Read the payload from `.data`:
 const { data: piante } = await jenny.action('lista_piante');
 ```
 
+## External view (`view: {"kind": "external"}`)
+
+When the user asks for an app that just **shows an existing web UI on their own server**, this
+is the shape — do not write an `index.html` with an `<iframe>` pointing at it:
+
+```json
+{ "name": "Telecomando", "description": "Il telecomando del server di casa",
+  "icon": "ti-device-tv",
+  "server": { "baseUrl": "http://192.168.1.50:8091" },
+  "view": { "kind": "external" } }
+```
+
+No `app/index.html`, no `actions`. The gateway serves the server's UI through a loopback proxy
+and the SPA frames that.
+
+**A hand-written `<iframe src="http://...">` does NOT work, and fails silently.** The APK's
+network policy permits cleartext only to the local gateway, so the WebView refuses the frame
+with `ERR_CLEARTEXT_NOT_PERMITTED` before any request goes out — the user sees a blank panel.
+That is exactly how one such app shipped looking finished and doing nothing. `view: external`
+is the supported way to express it.
+
+Constraints:
+
+- requires `server.baseUrl`;
+- `http://` only — an `https` server needs no proxy, frame it directly;
+- the server must be reachable from the phone when the app is opened (LAN, or Tailscale — the
+  SSRF policy allows both). If it is not, say so rather than adding a "ping" action to check.
+
 ## Complete example
 
 ```json
@@ -117,7 +157,7 @@ const { data: piante } = await jenny.action('lista_piante');
   "name": "Piante",
   "description": "Monitoraggio piante di casa: umidità, stato, diario delle cure",
   "icon": "ti-plant",
-  "server": { "baseUrl": "http://192.168.1.50:8080", "auth": { "secretRef": "piante_token" } },
+  "server": { "baseUrl": "http://192.168.1.50:8080" },
   "actions": [
     { "name": "lista_piante", "description": "Elenco piante con stato",
       "kind": "http", "method": "GET", "path": "/plants" },

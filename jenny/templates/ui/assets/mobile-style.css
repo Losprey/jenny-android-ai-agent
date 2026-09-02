@@ -3317,6 +3317,22 @@ body {
   color: var(--text-muted); font-size: 20px; padding: 4px 8px;
 }
 .app-frame-overlay iframe { flex: 1; width: 100%; border: 0; background: transparent; }
+/* Fascia d'errore di un sub-frame che non ha caricato. Sta *sotto* l'header e
+   sopra l'iframe: il riquadro bianco resta visibile (è l'informazione che
+   l'utente sta già guardando), ma smette di essere l'unica cosa che dice. */
+.app-frame-error {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 14px;
+  background: var(--danger-bg, rgba(220, 80, 80, 0.12));
+  border-bottom: 1px solid var(--border);
+  color: var(--text); font-size: 13px; line-height: 1.4;
+}
+.app-frame-error i { flex: none; margin-top: 1px; color: var(--danger, #d85050); }
+.app-frame-error code {
+  font-size: 12px; word-break: break-all;
+  background: var(--code-bg, rgba(127, 127, 127, 0.14));
+  padding: 1px 4px; border-radius: 3px;
+}
 
 /* ══ Launcher sheet — il cassetto delle app ═══════════════════════════════
    Sale dal basso sopra la vista corrente e si apre dal pulsante nella riga del

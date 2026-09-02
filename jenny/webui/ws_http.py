@@ -803,6 +803,24 @@ class GatewayHTTPHandler:
                 "default-src 'self'; script-src 'self'; "
                 "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
                 "font-src 'self'; connect-src 'self' ws: wss:; "
+                # La vista esterna di una Jenny App e' servita dal proxy su
+                # loopback (``apps/proxy.py``) su una porta EFFIMERA, quindi e'
+                # un'altra origine e non e' 'self'. Senza questa direttiva
+                # ricadeva su ``default-src 'self'`` e la CSP della shell
+                # bloccava il proxio della shell stessa:
+                # ``net::ERR_BLOCKED_BY_CSP``, misurato sul device il 01/09/2026.
+                # La porta non e' prevedibile qui (l'header si scrive servendo
+                # index.html, prima che un proxy esista), da cui il carattere
+                # jolly sulla sola porta.
+                #
+                # Cosa concede: la shell puo' incorniciare qualunque porta di
+                # 127.0.0.1. La CSP qui e' defense-in-depth contro
+                # un'iniezione nella SPA, e per un'iniezione le porte loopback
+                # del telefono non sono un canale di esfiltrazione — sono sulla
+                # stessa macchina su cui gia' gira. Le direttive che contano
+                # contro quello scenario (``script-src``, ``connect-src``,
+                # ``object-src``, ``base-uri``) restano intatte.
+                "frame-src 'self' http://127.0.0.1:*; "
                 "object-src 'none'; base-uri 'none'",
             ))
         return _http_response(

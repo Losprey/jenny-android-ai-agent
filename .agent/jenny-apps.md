@@ -40,7 +40,20 @@ in-workspace equivalent.
 ## Actions (the contract)
 
 Actions are declared in `app.json` with a JSON Schema for their parameters. They are
-declarative — the gateway never executes per-app code (no plugin system). Two kinds:
+declarative — the gateway never executes per-app code (no plugin system).
+
+**`actions` is optional** (since Sept 2026). An app whose only job is to draw a screen has
+nothing agent-facing to declare, and the previous non-empty requirement made that app
+impossible: the observed result was an *invented* action added purely to satisfy the schema,
+which then shipped broken. `AppToolsSyncer` registers zero tools for such an app, which is
+the correct outcome. The boundary paragraph above always said an app "can" carry an
+agent-facing side — the code disagreed with it.
+
+**Never `server.auth`.** There is no credential store; `_parse_manifest` rejects a manifest
+declaring it (app loads broken, remedy named) and `execute_http_action` refuses with 501 as
+a second line. See `.agent/security.md`.
+
+Two kinds:
 
 - `storage`: typed mutations/queries on collections under `data/` (append, set, update,
   delete, query), validated by the gateway before writing.
@@ -56,7 +69,7 @@ Example manifest:
 ```json
 {
   "name": "Piante",
-  "server": { "baseUrl": "http://192.168.1.50:8080", "auth": { "secretRef": "piante_token" } },
+  "server": { "baseUrl": "http://192.168.1.50:8080" },
   "actions": [
     { "name": "lista_piante",   "kind": "http", "method": "GET", "path": "/plants",
       "description": "Elenco piante con stato" },
@@ -67,6 +80,46 @@ Example manifest:
   ]
 }
 ```
+
+## Vista esterna (`view: {"kind": "external"}`)
+
+Un'app puo' dichiarare che il suo schermo **e' la UI del suo server**, invece di
+`app/index.html`:
+
+```json
+{ "name": "Telecomando", "description": "...",
+  "server": { "baseUrl": "http://hps:8091" },
+  "view": { "kind": "external" } }
+```
+
+`actions` e `app/index.html` diventano entrambi superflui (il validatore avvisa se
+`index.html` c'e' comunque: non verrebbe mai mostrato).
+
+**Perche' esiste.** Un iframe verso un `http://` non-loopback non parte affatto: la
+network security config dell'APK permette il cleartext solo verso il gateway, e la
+WebView risponde `ERR_CLEARTEXT_NOT_PERMITTED` prima di aprire un socket. Prima di
+Sett 2026 "mostrami il mio server" non era esprimibile, e un'app che ci provava era
+un riquadro bianco senza messaggi.
+
+**Come funziona.** `GET /api/webui/apps/<slug>/view` avvia `apps/proxy.py::AppViewProxy`
+— un listener su `127.0.0.1:<porta effimera>` che inoltra a `server.baseUrl` a livello
+di byte — e torna `{"url": ...}`. La SPA incornicia quell'URL. `.../view/close` chiude
+il listener; un idle timeout lo chiude comunque se quel segnale non arriva.
+
+Due vincoli spiegano la forma:
+
+- **Il proxy non puo' essere una route del gateway.** Il gateway gira sul parser di
+  `websockets`, che non legge il body: un POST non passerebbe, e una UI remota reale
+  ne fa. Ed e' anche il motivo per cui non e' un prefisso di path — i path assoluti
+  della pagina remota (`/style.css`) si risolverebbero sulla radice del gateway.
+- **La vista esterna non e' annidata dentro l'app-frame.** I flag di sandbox si
+  ereditano nei frame figli, quindi annidarla le darebbe un'origine opaca: cookie
+  bloccati, `localStorage` che solleva, `fetch` con `Origin: null`. Ha il suo overlay
+  con `allow-same-origin`, che li' e' sicuro perche' l'origine e' quella del proxy,
+  non quella del gateway (porta diversa). Threat model completo in `.agent/security.md`.
+
+Solo `http://`: un server `https` non ha bisogno del proxy (la policy cleartext non lo
+tocca) e il proxy lo rifiuta dicendolo.
 
 ## One contract, three consumers
 
@@ -115,10 +168,19 @@ chat DOM; it only talks to its own endpoints.
 
 ## Credentials
 
-`app.json` holds only a reference: `"auth": {"secretRef": "..."}`. The actual secret lives in
-a separate store excluded from agent reads (hook point:
-`jenny/security/workspace_access.py`) and is injected by the proxy at call time. Tokens
-never enter the LLM context or app HTML.
+**Not implemented, and `server.auth` is rejected — not tolerated.** The design was: `app.json`
+holds only a reference (`"auth": {"secretRef": "..."}`), the secret lives in a separate store
+excluded from agent reads (hook point: `jenny/security/workspace_access.py`), and the proxy
+injects it at call time. None of that store exists.
+
+Until it does, a manifest declaring `server.auth` is **rejected at load** by `_parse_manifest`
+(the app shows as broken, with the remedy in the message) and refused with 501 by
+`execute_http_action` as a second line. Before Sept 2026 only the 501 existed *and* the
+app-creator skill instructed writing `secretRef` anyway "so manifests keep working when the
+store lands" — so an app could validate clean, open, and have every http action dead. It
+happened. An app server must be reachable without credentials.
+
+Tokens still never enter the LLM context or app HTML.
 
 ## App creation
 

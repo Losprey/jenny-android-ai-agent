@@ -592,7 +592,10 @@
     "unavailableWhy": "Unavailable: {reason}",
     "loadFailed": "The list could not be read.",
     "azGuide": "Alphabet guide",
-    "jumpToLetter": "Jump to letter {letter}"
+    "jumpToLetter": "Jump to letter {letter}",
+    "frameCleartextBlocked": "{host} will not load: it is plain http, and the app's network policy allows cleartext only to the local gateway. It needs an https server, or an external-view app.",
+    "frameLoadFailed": "{host} failed to load: {reason}",
+    "viewProxyFailed": "Could not open the external view: {error}"
   },
   "wiki": {
     "home": "Wiki",
