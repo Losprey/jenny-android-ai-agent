@@ -42,6 +42,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from loguru import logger
+
 # La parola che apre la riga. Maiuscola e senza spazi: è un token, non prosa.
 COULD_NOT_CHECK_MARKER = "CHECK_FAILED"
 
@@ -220,6 +222,36 @@ def is_only_markers(text: str | None) -> bool:
     return bool(lines) and all(line.startswith(_ALL_MARKERS) for line in lines)
 
 
+def _is_specimen(head: str) -> bool:
+    """La riga è il *modello* della riga, non una riga scritta.
+
+    Misurato sul Titan 2 il 2026-09-03 alle 11:25, e non è un caso di scuola: il
+    modello ha scritto la sua riga vera e poi ha rigurgitato **l'intero
+    preambolo** in coda alla risposta — 4.883 caratteri, con dentro
+    ``CHECK_FAILED <task number>: <one short line naming what stopped you>`` e
+    ``CHECK_WARNED <task number>``. Il parser li ha letti come dichiarazioni, e
+    un controllo perfettamente sano è finito registrato come guasto **e** come
+    già segnalato all'utente (``escalated``), senza che nessun avviso sia mai
+    partito: esattamente lo stato "controllo morto in silenzio" che tutto questo
+    modulo esiste per impedire.
+
+    Il rigurgito del template è una patologia nota di questo modello — c'è già
+    ``strip_think`` a toglierlo da ciò che raggiunge l'**utente** (v. il commit
+    del 2026-08-27), e non c'era niente a toglierlo da ciò che raggiunge il
+    *parser*. Qui la difesa è precisa e non euristica: un segnaposto comincia per
+    ``<``, e una riga scritta da qualcuno non lo fa mai.
+
+    La direzione d'errore è quella giusta anche nel caso limite in cui un motivo
+    vero cominciasse per ``<``. Il generale "nel dubbio è ``CHECK_FAILED``" vale
+    fra due letture di un'osservazione ambigua; qui l'osservazione non è ambigua,
+    ed è il ramo opposto a costare di più: un guasto inventato si porta dietro un
+    ``CHECK_WARNED`` inventato, che zittisce gli avvisi veri di quel controllo
+    finché qualcuno non se ne accorge. Un guasto vero perso, invece, si ripresenta
+    al ciclo dopo.
+    """
+    return head.startswith("<")
+
+
 def _parse_marks(final_text: str | None, marker: str) -> list[CouldNotCheckMark]:
     """Corpo condiviso dai quattro marcatori. Nessuno è prefisso di un altro."""
     marks: list[CouldNotCheckMark] = []
@@ -229,6 +261,9 @@ def _parse_marks(final_text: str | None, marker: str) -> list[CouldNotCheckMark]
             continue
         rest = stripped[len(marker):].rstrip(_MARKER_DECORATION)
         head = rest.lstrip()
+        if _is_specimen(head.lstrip(_SEPARATORS).lstrip()) or _is_specimen(head):
+            logger.debug("Marker specimen echoed back, not a declaration: {!r}", stripped[:80])
+            continue
         if head[:1] and head[0] in _SEPARATORS:
             # Forma B8: ``CHECK_FAILED: motivo``. Il motivo può contenere due
             # punti a sua volta, quindi qui non si va a cercare un separatore —

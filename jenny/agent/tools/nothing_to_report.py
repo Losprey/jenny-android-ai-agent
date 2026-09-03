@@ -164,7 +164,7 @@ class NothingToReportTool(Tool, ContextAware):
                 return (
                     f"Ignored the value {task!r}: `task` must be the plain number of a "
                     "check as listed in this run's prompt. Nothing was delivered to the "
-                    "user either way; close the turn with a single short line."
+                    "user either way; end the turn."
                 )
 
         count = self._record(number)
@@ -173,9 +173,14 @@ class NothingToReportTool(Tool, ContextAware):
             number,
             count,
         )
+        # Nessuna richiesta di "chiudere con una riga". La prima versione la
+        # faceva, e il 2026-09-03 alle 11:25 il modello ha chiuso rigurgitando
+        # 4.883 caratteri di preambolo, segnaposto dei marcatori compresi (v.
+        # ``could_not_check._is_specimen``). Qui il turno non deve scrivere altro:
+        # la risposta finale di un turno silenzioso non la legge nessuno.
         return (
             "Recorded. Nothing was delivered to the user, and that is the right outcome. "
-            "Close the turn now with a single short line; it reaches nobody."
+            "End the turn now; nothing more is needed."
         )
 
 
