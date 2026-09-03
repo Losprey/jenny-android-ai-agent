@@ -499,8 +499,16 @@ class CronService:
             jobs_map[j.id] = j
 
         def _del(params: dict):
+            # Cancellare un job che non c'e' piu' e' un no-op, non un errore: il
+            # giornale si rilegge a **ogni** caricamento finche' il servizio non
+            # parte, e nel frattempo ``register_system_job`` salva lo store senza
+            # quel job. Con ``pop(job_id)`` secco la riga sollevava a ogni giro,
+            # il ``continue`` sotto saltava ``changed = True``, e il giornale non
+            # veniva mai svuotato: un traceback per ogni ``_load_store``, per
+            # sempre (misurato sul telefono il 03/09/2026, primo avvio della
+            # 0.10.0, con la riga «del atlas» del ritiro).
             if job_id := params.get("job_id"):
-                jobs_map.pop(job_id)
+                jobs_map.pop(job_id, None)
 
         with self._lock:
             with open(self._action_path, "r", encoding="utf-8") as f:
@@ -1293,11 +1301,13 @@ class CronService:
         store.jobs = [j for j in store.jobs if j.id != job_id]
         if len(store.jobs) == before:
             return False
+        # Salva direttamente, come ``register_system_job`` che gira nella stessa
+        # fase (``GatewayContainer.build``, prima di ``start``): passare dal
+        # giornale delle azioni lascerebbe una riga «del» che il primo
+        # ``_save_store`` della registrazione rende gia' vecchia.
+        self._save_store()
         if self._running:
-            self._save_store()
             self._arm_timer()
-        else:
-            self._append_action("del", {"job_id": job_id})
         dropped = self._remove_run_records(job_id)
         logger.info(
             "Cron: retired system job {} — this version no longer runs it ({} run records)",

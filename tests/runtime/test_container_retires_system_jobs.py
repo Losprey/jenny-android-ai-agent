@@ -13,10 +13,12 @@ Il test lo nomina perche' e' la voce vera dell'elenco, non un esempio.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from loguru import logger as loguru_logger
 
 from jenny.config import paths as paths_mod
 from jenny.config.schema import Config
@@ -126,3 +128,61 @@ def test_remove_job_still_refuses_a_system_job(workspace: Path) -> None:
     assert service.remove_job("atlas") == "protected"
     assert service.retire_system_job("atlas") is True
     assert service.retire_system_job("atlas") is False
+
+
+def test_retiring_before_start_writes_the_store_not_the_journal(workspace: Path) -> None:
+    """Misurato sul telefono al primo avvio della 0.10.0.
+
+    Il ritiro gira in ``build``, prima di ``start``: passando dal giornale delle
+    azioni lasciava una riga «del atlas» che ``register_system_job``, un attimo
+    dopo, rendeva gia' vecchia salvando lo store senza quel job. Ogni
+    ``_load_store`` la rigiocava su uno store che il job non l'aveva piu', e il
+    ``pop`` sollevava — sei traceback in due minuti, e il giornale mai svuotato.
+    """
+    path = _seed(workspace)
+    service = CronService(path)
+
+    assert service.retire_system_job("atlas") is True
+
+    journal = path.parent / "action.jsonl"
+    assert not journal.exists() or journal.read_text(encoding="utf-8").strip() == ""
+    on_disk = {j["id"] for j in json.loads(path.read_text(encoding="utf-8"))["jobs"]}
+    assert "atlas" not in on_disk and "a1b2c3" in on_disk
+
+
+def test_a_journal_del_for_a_job_that_is_gone_is_a_no_op(workspace: Path) -> None:
+    """La meta' generale del difetto: cancellare cio' che non c'e' e' idempotente.
+
+    Vale per qualunque «del» rimasto nel giornale — anche quello che
+    ``remove_job`` scrive a servizio fermo — e la riga deve contare come
+    applicata, o il giornale non si svuota mai.
+    """
+    path = workspace / "cron" / "jobs.json"
+    service = CronService(path)
+    service.register_system_job(
+        CronJob(
+            id="dream", name="dream",
+            schedule=CronSchedule(kind="every", every_ms=2 * _HOUR_MS),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
+    journal = path.parent / "action.jsonl"
+    journal.write_text(json.dumps({"action": "del", "params": {"job_id": "atlas"}}) + "\n",
+                       encoding="utf-8")
+    records: list[str] = []
+    handler = loguru_logger.add(lambda m: records.append(str(m)), level="ERROR")
+    try:
+        reloaded = CronService(path)
+        assert {j.id for j in reloaded.list_jobs()} == {"dream"}
+        # A servizio avviato il giornale applicato si svuota: e' la prova che la
+        # riga e' stata contata come fatta e non saltata.
+        reloaded._running = True
+        try:
+            reloaded._load_store()
+        finally:
+            reloaded._running = False
+    finally:
+        loguru_logger.remove(handler)
+
+    assert records == [], records
+    assert journal.read_text(encoding="utf-8").strip() == ""
