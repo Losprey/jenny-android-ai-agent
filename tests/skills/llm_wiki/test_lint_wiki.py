@@ -518,7 +518,7 @@ def test_the_first_run_records_a_baseline_instead_of_claiming_anything(
 
 def test_the_state_lives_in_the_hidden_folder(lint_wiki, tmp_path, capsys):
     """Macchinario, non materiale dell'utente: come il cursore del giardiniere, e
-    per la stessa ragione — sotto ``.jenny/`` viste, grafo e impronta di Atlas non
+    per la stessa ragione — sotto ``.jenny/`` viste e grafo non
     lo vedono."""
     root = _notebook(tmp_path)
     _journal(root, "un fatto")

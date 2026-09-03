@@ -181,7 +181,7 @@ class TestTheThreeThingsItMustNotDo:
         ``jenny/agent/internal_run.py`` la si raggiunge anche con
         ``from jenny.agent.internal_run import internal_run_should_commit``, che
         lega il nome all'import e ignora qualunque patch — ed è proprio la forma
-        scritta in ``atlas.py`` e ``gardener.py``, cioè quella che un lettore
+        scritta in ``gardener.py``, cioè quella che un lettore
         copierebbe per prima. Da qui la seconda metà del test, che guarda il
         sorgente invece della chiamata.
         """
@@ -684,8 +684,8 @@ class TestTokenAccounting:
     ``assert recorded == [None]`` — cioè documentava di aver passato ``None`` — e
     si chiamava «is still charged». Verde, e su niente.
 
-    Misurato il 25/08 su ``token-usage.json`` del dispositivo: in **27 giorni** i
-    bucket ``dream`` e ``atlas`` non erano comparsi una volta. ``resp`` è un
+    Misurato il 25/08 su ``token-usage.json`` del dispositivo: in **27 giorni** il
+    bucket ``dream`` non era comparso una volta. ``resp`` è un
     ``OutboundMessage``, che un campo ``usage`` non ce l'ha e non l'ha mai avuto.
 
     La contabilità la fa ``TokenUsageHook.after_iteration`` sul turno, che è

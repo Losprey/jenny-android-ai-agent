@@ -31,7 +31,6 @@ from jenny.utils.helpers import (
     ensure_dir,
     strip_think,
     truncate_text,
-    truncate_text_to_tokens,
 )
 from jenny.utils.path import atomic_write
 from jenny.utils.prompt_templates import render_template
@@ -195,11 +194,6 @@ class MemoryStore:
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
-        # Rubrica compilata da Atlas a partire da workspace/wikis/. Vive qui
-        # accanto a MEMORY.md perché è memoria a tutti gli effetti, ma è un file
-        # distinto con un proprietario distinto: Dream non ha il permesso di
-        # scriverlo e Atlas non ha il permesso di scrivere MEMORY.md.
-        self.wiki_file = self.memory_dir / "WIKI.md"
         self.history_file = self.memory_dir / "history.jsonl"
         self.soul_file = workspace / "SOUL.md"
         self.user_file = workspace / "USER.md"
@@ -225,11 +219,6 @@ class MemoryStore:
 
     def read_memory(self) -> str:
         return self.read_file(self.memory_file)
-
-    # -- WIKI.md (wiki directory, managed by Atlas) --------------------------
-
-    def read_wiki_memory(self) -> str:
-        return self.read_file(self.wiki_file)
 
     # -- context injection (used by context.py) ------------------------------
 
@@ -284,24 +273,10 @@ class MemoryStore:
             "journal it and do not promote it into a page."
         )
 
-    def get_wiki_memory_context(self, max_tokens: int | None = None) -> str:
-        """Blocco rubrica per il system prompt, troncato al tetto configurato.
-
-        Il troncamento sta qui e non nel prompt di Atlas perché è l'ultima
-        linea di difesa: un run che produce un file lungo il doppio del dovuto
-        peserebbe altrimenti su ogni turno fino al run successivo.
-        """
-        content = self.read_wiki_memory().strip()
-        if not content:
-            return ""
-        if max_tokens is not None and max_tokens > 0:
-            content = truncate_text_to_tokens(content, max_tokens)
-        return f"## Wiki Directory\n{content}"
-
     def get_archive_context(self) -> str:
         """Una riga sola per dire che il tier freddo esiste, o stringa vuota.
 
-        Serve per la stessa ragione per cui Atlas funziona: **un indice che
+        Serve per la stessa ragione dell'elenco delle wiki: **un indice che
         nessuno sa esistere non viene mai aperto**. Un archivio invisibile al
         modello è indistinguibile, dal suo punto di vista, da una cancellazione —
         e allora tanto varrebbe cancellare.
@@ -1338,7 +1313,7 @@ class MemoryStore:
         return tools
 
     # Le tre regole dei run interni vivono in ``jenny/agent/internal_run.py``:
-    # non sono I/O sui file di memoria (Atlas e il giardiniere non ne aprono
+    # non sono I/O sui file di memoria (il giardiniere non ne apre
     # nessuno), e stavano qui solo perché Dream è stato il primo a servirsene.
     # Restano raggiungibili da ``MemoryStore`` come alias: i test e
     # ``docs/internals/architecture.md`` le nominano così, e questo spostamento

@@ -2,14 +2,14 @@
 
 Il difetto che questi test bloccano: l'inventario generato in coda al system
 prompt leggeva il registry *di default* del loop, mentre il runner usa quello
-del turno. Con un registry sostituito — Dream, Atlas — il prompt descriveva un
+del turno. Con un registry sostituito — Dream, il giardiniere — il prompt descriveva un
 agente diverso da quello che girava: annunciava ``spawn`` e ``cron``, che non
 ha, e taceva su ``apply_patch``, che e l'unico modo con cui puo scrivere.
 
 La garanzia qui NON e una lista di casi. E la *derivazione*: si prova che
 l'inventario nasce dal registry del turno, con un registry inventato che non
 somiglia a nessuno di quelli veri. Se vale per quello, vale per ogni registry
-che esistera mai — Atlas compreso, senza che nessuno debba aggiungerlo qui.
+che esistera mai, senza che nessuno debba aggiungerlo qui.
 """
 
 from __future__ import annotations
@@ -122,10 +122,10 @@ def _system_prompt(captured: dict) -> str:
 
 
 async def test_the_inventory_is_derived_from_the_turn_registry(workspace):
-    """Il test che copre Atlas senza nominarlo.
+    """Il test che copre ogni registry senza nominarlo.
 
-    Il registry qui non e ne quello del loop ne quello di Dream ne quello di
-    Atlas: e inventato. Se l'inventario stampa esattamente questi nomi, allora
+    Il registry qui non e ne quello del loop ne quello di Dream ne quello del
+    giardiniere: e inventato. Se l'inventario stampa esattamente questi nomi, allora
     nasce dal registry del turno e non da una fonte parallela — e la proprieta
     vale per qualunque registry, presente o futuro.
     """
@@ -181,20 +181,6 @@ async def test_a_dream_turn_is_described_as_dream(workspace):
     assert listed.isdisjoint({"spawn", "cron", "grep", "subagent_status"})
 
 
-async def test_an_atlas_turn_is_described_as_atlas(workspace):
-    """Atlas e ibrido: legge ovunque, scrive un file solo — e ``grep`` ce l'ha."""
-    from jenny.agent.atlas import AtlasStore
-
-    loop, captured = _loop_with_capture(workspace)
-    atlas_tools = AtlasStore(workspace).build_tools()
-
-    await loop.process_direct("compila", session_key="atlas:test", tools=atlas_tools)
-
-    listed = _inventory_names(_system_prompt(captured))
-    assert {"grep", "find_files", "apply_patch"} <= listed
-    assert listed.isdisjoint({"spawn", "cron", "subagent_status"})
-
-
 # -- il gemello: la modalita, non solo l'elenco -----------------------------
 
 
@@ -205,7 +191,7 @@ async def test_a_substituted_registry_is_not_the_orchestrator(workspace):
     """Il difetto gemello di quello sopra, trovato dall'audit delle giunture.
 
     ``orchestrator`` era un flag del costruttore, quindi ogni turno riceveva il
-    blocco "non puoi scrivere file, delega con ``spawn``" — anche Dream e Atlas,
+    blocco "non puoi scrivere file, delega con ``spawn``" — anche Dream e il giardiniere,
     che di mestiere scrivono file e ``spawn`` non ce l'hanno. Il prompt diceva a
     due agenti di non fare l'unica cosa per cui esistono.
     """
@@ -221,18 +207,3 @@ async def test_a_substituted_registry_is_not_the_orchestrator(workspace):
     assert _ORCHESTRATOR_BLOCK in default
     assert _ORCHESTRATOR_BLOCK not in substituted
     assert "goes to a subagent via `spawn`" not in substituted
-
-
-async def test_atlas_is_never_told_it_cannot_write(workspace):
-    """Il caso concreto: scrivere e l'unico mestiere di Atlas."""
-    from jenny.agent.atlas import AtlasStore
-
-    loop, captured = _loop_with_capture(workspace)
-
-    await loop.process_direct(
-        "compila", session_key="atlas:t", tools=AtlasStore(workspace).build_tools(),
-    )
-
-    prompt = _system_prompt(captured)
-    assert "you cannot execute code, write or patch" not in prompt
-    assert _ORCHESTRATOR_BLOCK not in prompt

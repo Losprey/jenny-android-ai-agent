@@ -1,8 +1,8 @@
-"""Discovery e fingerprint delle wiki (``jenny/utils/wiki_paths.py``).
+"""Discovery delle wiki (``jenny/utils/wiki_paths.py``).
 
-Il fingerprint è ciò che decide se Atlas parte o no: se sbaglia per eccesso si
-paga un turno LLM a vuoto ogni tick, se sbaglia per difetto la rubrica resta
-indietro. Questi test fissano i due confini.
+Quel che il picker, il blocco ``## Wikis`` del prompt e il giardiniere leggono
+per sapere quali wiki esistono e come si presentano. I due confini che questi
+test fissano: cosa e' una wiki, e cosa e' una pagina.
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ from jenny.utils.wiki_paths import (
     discover_wikis,
     is_wiki_page_rel,
     iter_wiki_pages,
-    iter_wiki_sources,
     read_wiki_scope,
-    wiki_fingerprint,
     wiki_schema_file,
 )
 
@@ -102,82 +100,6 @@ class TestScope:
         assert read_wiki_scope(root) == "(no AGENTS.md)"
 
 
-class TestSources:
-    def test_includes_schema_pages_and_registry(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        _make_wiki(wikis, "main", pages={"index.md": "# Index", "entities/ada.md": "# Ada"})
-        (wikis / "_index.md").write_text("# Workspace Index\n", encoding="utf-8")
-
-        names = {p.relative_to(wikis).as_posix() for p in iter_wiki_sources(wikis)}
-
-        assert names == {
-            "_index.md",
-            "main/AGENTS.md",
-            "main/wiki/index.md",
-            "main/wiki/entities/ada.md",
-        }
-
-    def test_excludes_log_and_audit(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        root = _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        for rel in ("log/20260806.md", "audit/open-1.md", "audit/resolved/old.md"):
-            target = root / "wiki" / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text("noise", encoding="utf-8")
-
-        names = {p.relative_to(wikis).as_posix() for p in iter_wiki_sources(wikis)}
-
-        assert names == {"main/AGENTS.md", "main/wiki/index.md"}
-
-
-class TestFingerprint:
-    def test_is_stable_across_calls(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-
-        assert wiki_fingerprint(wikis) == wiki_fingerprint(wikis)
-
-    def test_changes_when_a_page_changes(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        root = _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        before = wiki_fingerprint(wikis)
-
-        _touch_newer(root / "wiki" / "index.md")
-
-        assert wiki_fingerprint(wikis) != before
-
-    def test_changes_when_a_page_appears(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        root = _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        before = wiki_fingerprint(wikis)
-
-        (root / "wiki" / "entities").mkdir()
-        (root / "wiki" / "entities" / "ada.md").write_text("# Ada", encoding="utf-8")
-
-        assert wiki_fingerprint(wikis) != before
-
-    def test_ignores_log_churn(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        root = _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        before = wiki_fingerprint(wikis)
-
-        log = root / "wiki" / "log"
-        log.mkdir()
-        (log / "20260806.md").write_text("## [10:00] lint | ok\n", encoding="utf-8")
-
-        assert wiki_fingerprint(wikis) == before
-
-    def test_extra_paths_participate(self, tmp_path):
-        wikis = tmp_path / "wikis"
-        _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        policy = tmp_path / "WIKI_POLICY.md"
-        before = wiki_fingerprint(wikis, extra_paths=(policy,))
-
-        policy.write_text("only plants with a nickname\n", encoding="utf-8")
-
-        assert wiki_fingerprint(wikis, extra_paths=(policy,)) != before
-
-
 class TestQualeFileDiIstruzioni:
     """Passo 7.5: ``AGENTS.md``, e **solo** quello.
 
@@ -229,60 +151,12 @@ class TestQualeFileDiIstruzioni:
 
         assert wiki_schema_file(root) is None
 
-    def test_limpronta_vede_agents(self, tmp_path):
-        """Il punto che senza ripiego sarebbe rimasto muto.
-
-        Se ``iter_wiki_sources`` guardasse solo il vecchio nome, una wiki che
-        tiene le istruzioni in ``AGENTS.md`` non farebbe mai cambiare l'impronta:
-        la modifichi e Atlas non se ne accorge, senza un errore e senza un log.
-        """
-        wikis = tmp_path / "wikis"
-        root = _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        (root / "AGENTS.md").unlink()
-        agents = root / "AGENTS.md"
-        agents.write_text("---\nsummary: prima\n---\n", encoding="utf-8")
-
-        names = {p.relative_to(wikis).as_posix() for p in iter_wiki_sources(wikis)}
-        assert "main/AGENTS.md" in names
-
-        before = wiki_fingerprint(wikis)
-        agents.write_text("---\nsummary: dopo\n---\n", encoding="utf-8")
-        assert wiki_fingerprint(wikis) != before
-
-    def test_limpronta_non_vede_claude(self, tmp_path):
-        """Il verso opposto, ed e' quel che il docstring di ``iter_wiki_sources``
-        adesso dichiara: **un nome solo**.
-
-        Serviva scritto da qualche parte perche' il docstring diceva ancora
-        «``AGENTS.md`` o ``CLAUDE.md``» a mesi dal 7.5, e un commento che mente
-        costa piu' di un commento che manca: T6.9 ha argomentato mezz'ora dalla
-        parte sbagliata leggendo proprio queste righe. La conseguenza vera e' la
-        finestra dichiarata dal 7.5 — una wiki non ancora migrata non muove
-        l'impronta se le si riscrive il ``CLAUDE.md`` — e la chiude la migrazione
-        al primo avvio.
-        """
-        wikis = tmp_path / "wikis"
-        root = _make_wiki(wikis, "main", pages={"index.md": "# Index"})
-        (root / "AGENTS.md").unlink()
-        legacy = root / "CLAUDE.md"
-        legacy.write_text("---\nsummary: prima\n---\n", encoding="utf-8")
-
-        names = {p.relative_to(wikis).as_posix() for p in iter_wiki_sources(wikis)}
-        assert "main/CLAUDE.md" not in names
-        assert "main/wiki/index.md" in names  # il resto della wiki c'e'
-
-        before = wiki_fingerprint(wikis)
-        _touch_newer(legacy)
-        assert wiki_fingerprint(wikis) == before
-
-
 class TestElencoPagineSenzaTitolo:
     """``iter_wiki_pages(titles=False)``: gli stessi percorsi, nessuna lettura. T3.11.
 
     Il titolo costa un ``read_text()`` **per pagina**, e chi lo usa è una
     minoranza: lo mettono nell'elenco l'inventario del giardiniere
-    (``GardenerStore.build_inventory``) e quello di Atlas
-    (``AtlasStore.build_inventory``); ``ContextBuilder._read_project_pages`` lo
+    (``GardenerStore.build_inventory``); ``ContextBuilder._read_project_pages`` lo
     buttava via — dentro ``build_system_prompt``, cioè sul loop dell'evento a
     ogni turno.
     """
@@ -375,8 +249,6 @@ class TestCheCosaEUnaPagina:
       anche le *cartelle*, mentre gli altri due guardavano solo il nome del
       file: una ``wiki/.bozze/`` era invisibile all'utente e iniettata nel
       prompt a ogni turno;
-    * il fingerprint di Atlas includeva ``summaries/``, che il suo inventario
-      non può vedere: riscrivere un riassunto pagava una passata LLM a vuoto.
 
     Ora la regola è una — ``is_wiki_page_rel`` — e questi test sono i primi che
     ``iter_wiki_pages`` ha di suo dopo T3.11/T3.12 (quelli provano la manopola
@@ -484,32 +356,6 @@ class TestCheCosaEUnaPagina:
             return out
 
         assert files(build_tree(root)) == set(self._PAGES) | {"index.md"}
-
-    def test_l_impronta_di_atlas_guarda_quel_che_atlas_legge(self, tmp_path):
-        """Consumatore 4: ``iter_wiki_sources``, cioè quel che fa **ripartire**
-        Atlas (T9.4/G5).
-
-        ``summaries/`` era dentro l'impronta e fuori dall'inventario: riscrivere
-        un riassunto faceva ripartire una passata LLM i cui input non erano
-        cambiati di una riga. Le due asserzioni sono i due versi: il riassunto
-        non muove niente, la pagina sì — perché un'impronta che non si muove
-        mai è il guasto opposto, e costa una rubrica indietro in silenzio.
-        """
-        wikis = tmp_path / "wikis"
-        root = self._wiki(tmp_path)
-
-        names = {p.relative_to(wikis).as_posix() for p in iter_wiki_sources(wikis)}
-        assert "main/wiki/summaries/doc.md" not in names
-        assert "main/wiki/.bozze/nota.md" not in names
-        assert "main/wiki/index.md" in names  # la mappa resta un input
-
-        before = wiki_fingerprint(wikis)
-        _touch_newer(root / "wiki" / "summaries" / "doc.md")
-        assert wiki_fingerprint(wikis) == before
-
-        _touch_newer(root / "wiki" / "semine.md")
-        assert wiki_fingerprint(wikis) != before
-
 
 class TestTheIndexFilenameHasOneDefinition:
     """T3.12. ``WIKI_INDEX_FILENAME`` esisteva, e serviva a **escludere** la mappa
@@ -625,10 +471,9 @@ class TestTheIndexFilenameHasOneDefinition:
 
         **Due severità, e la differenza non è arbitraria.** Sui moduli lato
         agente si cerca il literal in una *join di percorso* (``/ "index.md"``):
-        ``atlas.py`` tiene ancora il nome dentro una riga di inventario
+        ``context.py`` tiene il nome dentro una riga del blocco ``## Wikis``
         (``→ wikis/<nome>/wiki/index.md``, la pista che il modello segue per
-        aprire la mappa), che è un consumatore vero ma di visualizzazione, e
-        toccarlo era fuori dal perimetro di T6.13. Sui due moduli lato web,
+        aprire la mappa), che è un consumatore vero ma di visualizzazione. Sui due moduli lato web,
         appena ripuliti, la regola è più stretta: **nessuna stringa** che finisca
         in ``index.md``, perché là il nome non arrivava mai da una join —
         ``_write_if_absent(root, "wiki/index.md", …)`` e ``target or "index.md"``
@@ -642,7 +487,7 @@ class TestTheIndexFilenameHasOneDefinition:
         repo = Path(__file__).resolve().parents[2]
         joins = re.compile(r'/\s*"index\.md"')
         literals = re.compile(r'"(?:[^"\n]*/)?index\.md"')
-        for rel in ("jenny/agent/context.py", "jenny/agent/gardener.py", "jenny/agent/atlas.py"):
+        for rel in ("jenny/agent/context.py", "jenny/agent/gardener.py"):
             source = (repo / rel).read_text(encoding="utf-8")
             assert not joins.search(source), f"{rel} costruisce il percorso della mappa a mano"
         for rel in ("jenny/webui/project_scaffold.py", "jenny/webui/wiki_routes.py"):

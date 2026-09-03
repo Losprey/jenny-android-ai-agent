@@ -87,7 +87,7 @@ class AgentHook:
         """Se questo hook va montato anche su un turno **effimero**.
 
         Un turno effimero e' lavoro interno che non lascia traccia nella
-        conversazione — Dream, Atlas, la revisione, una passata del giardiniere —
+        conversazione — Dream, la revisione, una passata del giardiniere —
         e ``AgentLoop`` gli monta il solo hook di progresso, tenendo fuori quelli
         registrati dall'esterno. Giusto per gli hook che *parlano* di un turno:
         un effimero non ha nessuno a cui parlare.
@@ -96,9 +96,8 @@ class AgentHook:
         a che vedere con la visibilita' del turno, e tenerlo fuori vuol dire non
         misurare esattamente il lavoro che nessuno vede — che e' il lavoro che
         conviene misurare di piu', perche' e' l'unico che l'utente non ha chiesto
-        e non vede arrivare. Misurato il 25/08: in **27 giorni** i bucket ``dream``
-        e ``atlas`` non erano mai comparsi una volta, con Dream che gira ogni due
-        ore.
+        e non vede arrivare. Misurato il 25/08: in **27 giorni** il bucket ``dream``
+        non era mai comparso una volta, con Dream che gira ogni due ore.
 
         Default ``False``: chi entra qui deve dichiararlo, perche' la domanda
         «questo hook ha senso senza un interlocutore?» va risposta una volta per

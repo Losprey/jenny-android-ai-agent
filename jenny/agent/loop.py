@@ -254,7 +254,6 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         max_messages: int = 120,
         hooks: list[AgentHook] | None = None,
         disabled_skills: list[str] | None = None,
-        wiki_directory_max_tokens: int | None = None,
         projects_subdir: str = "wikis",
         wikis_enabled: bool = True,
         tools_config: ToolsConfig | None = None,
@@ -344,7 +343,6 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             disabled_skills=disabled_skills,
             orchestrator=self.orchestrator_mode,
             available_tools=lambda: self.tools.tool_names,
-            wiki_directory_max_tokens=wiki_directory_max_tokens,
             # La stessa cartella dei progetti (v. sopra): il blocco ``## Wikis``
             # e il picker devono elencare le stesse cartelle.
             wikis_dir_name=projects_subdir,
@@ -492,7 +490,6 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             extract_document_text=config.extract_document_text,
             timezone=defaults.timezone,
             disabled_skills=defaults.disabled_skills,
-            wiki_directory_max_tokens=defaults.atlas.max_context_tokens,
             projects_subdir=config.wiki.wikis_dir,
             wikis_enabled=config.wiki.enabled,
             session_ttl_minutes=defaults.session_ttl_minutes,
@@ -685,7 +682,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         """Build the initial message list for the LLM turn.
 
         ``tools`` e il registry *di questo turno*, che non sempre e quello del
-        loop: Dream e Atlas ne portano uno proprio. Va passato perche il prompt
+        loop: Dream e il giardiniere ne portano uno proprio. Va passato perche il prompt
         dichiari i tool che il modello ricevera davvero — sono la stessa cosa
         detta due volte, e devono venire dalla stessa fonte.
         """
@@ -695,7 +692,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         return self.context.build_messages(
             available_tools=turn_tools.tool_names,
             # Un registry sostituito non e l'orchestratore: e un altro agente
-            # che passa da qui. Dire a Dream o ad Atlas "non puoi scrivere file,
+            # che passa da qui. Dire a Dream o al giardiniere "non puoi scrivere file,
             # delega con `spawn`" e falso due volte — scrivere e il loro unico
             # mestiere, e `spawn` non ce l'hanno.
             orchestrator=self.orchestrator_mode and turn_tools is self.tools,
@@ -1320,9 +1317,9 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         # che parlano.** La condizione era ``not ephemeral`` secca, e l'unico hook
         # extra che questa installazione monta e' la contabilita' dei token — cioe'
         # «effimero» voleva dire «non misurato». Misurato il 25/08 su
-        # ``token-usage.json``: in 27 giorni i bucket ``dream`` e ``atlas`` non
-        # erano comparsi **una volta**, mentre Dream gira ogni due ore, Atlas su
-        # cron e il giardiniere su otto wiki. Non un errore di categoria: lavoro
+        # ``token-usage.json``: in 27 giorni il bucket ``dream`` non era comparso
+        # **una volta**, mentre Dream gira ogni due ore e il giardiniere su otto
+        # wiki. Non un errore di categoria: lavoro
         # non contato affatto, e proprio quello che l'utente non ha chiesto.
         #
         # Chi vuole restare dichiara ``runs_when_ephemeral()``; il default e' ``False``,
@@ -2149,7 +2146,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             # chiamare e cosa il prompt gli dichiara di avere. Finche la
             # risoluzione stava solo davanti al runner, chi costruiva il prompt
             # rispondeva da solo alla stessa domanda, e con un registry
-            # sostituito (Dream, Atlas) rispondeva diverso.
+            # sostituito (Dream, il giardiniere) rispondeva diverso.
             tools=tools or self.tools,
             turn_token=turn_token,
         )
@@ -2245,7 +2242,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         hanno (o, nel verso opposto, non mostrerebbe niente).
 
         *tools* esiste perché il flag vive in una ContextVar **per istanza**: con un
-        registry sostituito (l'idioma di Dream/Atlas) leggere l'istanza di default
+        registry sostituito (l'idioma di Dream e del giardiniere) leggere l'istanza di default
         darebbe sempre ``False``. Chi ha il registry del turno lo passa.
         """
         mt = (tools or self.tools).get("message")
@@ -2404,7 +2401,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         """Process a message directly and return the outbound payload.
 
         Il valore di ritorno resta il *payload*, non il ``TurnOutcome``: qui
-        dentro passano Dream e Atlas, che leggono l'outbound come risultato
+        dentro passano Dream e il giardiniere, che leggono l'outbound come risultato
         interno del proprio run e non come consegna all'utente. Il tipo di esito
         vive dove si prende la decisione di consegna, cioe' in ``_dispatch``.
 
@@ -2412,7 +2409,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         cui il modello dichiara quali task non ha potuto eseguire) chiama
         :meth:`process_direct_outcome`, che e' lo stesso turno senza la perdita
         di informazione. Un fratello additivo invece di un tipo di ritorno piu'
-        largo: questa firma e' condivisa da Dream, Atlas e dai comandi, e
+        largo: questa firma e' condivisa da Dream, dal giardiniere e dai comandi, e
         cambiarla per un solo chiamante li toccherebbe tutti.
 
         ``visibility`` dichiara esplicitamente se il turno puo' raggiungere

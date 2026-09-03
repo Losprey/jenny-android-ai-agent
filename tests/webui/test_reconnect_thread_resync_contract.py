@@ -7,11 +7,11 @@ quel latch, ma il suo unico chiamante era ``mobile-jenny.js`` al cambio di
 sessione: nessuno lo chiamava su una riconnessione. Un messaggio pubblicato mentre
 il socket era giù non arrivava mai alla vista, e non ci arrivava più.
 
-Misurato sul Titan 2 il 2026-08-17. Due ``/atlas`` di fila: la chat mostrava
-``Mapping the wiki...``, ``Mapping the wiki...``, ``Atlas updated ... in 9.6s`` e
+Misurato sul Titan 2 il 2026-08-17. Due comandi in due tempi di fila: la chat mostrava
+l'ack, di nuovo l'ack, l'esito del secondo (``... in 9.6s``) e
 **non** la risposta del primo run. L'API la serviva nell'ordine giusto — quindi
 niente perdita di dati — e dopo un riavvio dell'app il messaggio compariva. Lo
-paga chi risponde in due tempi (``cmd_atlas``/``cmd_dream``: ack sincrono, esito
+paga chi risponde in due tempi (``cmd_dream``/``cmd_gardener``: ack sincrono, esito
 da un task in background), perché fra i due passano secondi o minuti, cioè la
 finestra in cui lo schermo si spegne e il socket cade. In chat resta l'ack senza
 esito, che è indistinguibile da un comando piantato.

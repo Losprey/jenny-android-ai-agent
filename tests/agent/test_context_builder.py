@@ -515,8 +515,8 @@ class TestSchedulingBlock:
     """La guida su cron/heartbeat va solo a chi il tool ce l'ha.
 
     Stava nel template di ``AGENTS.md``, cioè in un file che si crea al primo
-    avvio e non si aggiorna mai più, e ci andava *sempre*: anche a Dream e ad
-    Atlas, che ``cron`` non l'hanno mai avuto.
+    avvio e non si aggiorna mai più, e ci andava *sempre*: anche a Dream,
+    che ``cron`` non l'ha mai avuto.
     """
 
     def test_scheduling_block_is_rendered_when_cron_is_available(self, tmp_path):

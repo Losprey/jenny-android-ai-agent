@@ -364,7 +364,7 @@ class TokenUsageHook(AgentHook):
         """Misurare non e' parlare: v. ``AgentHook.runs_when_ephemeral``.
 
         E' l'unico hook che lo dichiara, e la ragione e' che il lavoro effimero —
-        Dream, Atlas, la revisione, il giardiniere — e' esattamente quello che
+        Dream, la revisione, il giardiniere — e' esattamente quello che
         l'utente non ha chiesto e non vede arrivare, cioe' quello che conviene
         misurare di piu'.
         """

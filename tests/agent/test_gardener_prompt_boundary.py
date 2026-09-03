@@ -9,8 +9,8 @@ sul solo attore in cui non c'è nessun utente a scegliere: la passata del
 giardiniere, la cui unica cartella scrivibile è ``wikis/<nome>/wiki/``.
 
 Misurato il 23/08 prima del fix, sul prompt di sistema vero di una chiave
-``gardener:``: arrivavano **tutti e cinque** — i tre file di identità, la rubrica
-di Atlas (``memory/WIKI.md``, che elenca ogni wiki, persona e pianta) e il blocco
+``gardener:``: arrivavano **tutti e cinque** — i tre file di identità, l'elenco
+delle wiki (allora una rubrica compilata, con ogni wiki, persona e pianta) e il blocco
 ``Recent History`` con la coda **della conversazione personale**. E l'ultimo era
 il verso rovesciato: la *conversazione* di quel progetto non prende niente da
 quella coda (``read_recent_history_for_prompt``, primo ramo), mentre la passata di
@@ -59,7 +59,7 @@ from jenny.agent.context import ContextBuilder
 from jenny.agent.gardener import GardenerStore
 from jenny.agent.memory import MemoryStore, is_gardener_session_key
 
-WIKI_DIRECTORY = "## Wiki Directory"
+WIKIS = "## Wikis"
 RECENT_HISTORY = "# Recent History"
 
 PERSONAL = "unified:default"
@@ -75,8 +75,11 @@ def _install(root: pathlib.Path) -> None:
     (root / "memory" / "MEMORY.md").write_text(
         "# Long-term\n\n- MEMMARK: i piani di stipendio\n", encoding="utf-8"
     )
-    (root / "memory" / "WIKI.md").write_text(
-        "# Wiki Directory\n\n## Wikis\n- **terapia** — 4 pagine\n\n## Plants\n- **Monstera**\n",
+    # Un'altra wiki, con uno scope riconoscibile: e' quel che il blocco elenca.
+    terapia = root / "wikis" / "terapia"
+    (terapia / "wiki").mkdir(parents=True, exist_ok=True)
+    (terapia / "AGENTS.md").write_text(
+        "---\nsummary: le piante di casa, la Monstera in testa\n---\n\n# terapia\n",
         encoding="utf-8",
     )
 
@@ -176,7 +179,7 @@ def test_a_gardener_pass_does_not_see_the_long_term_memory(tmp_path) -> None:
     listato dei file di ``agent/identity.md``, insieme a ``memory/history.jsonl``
     — due path che la sua cassetta rifiuta. È un'incoerenza che precede questo
     cancello e che non si chiude con lo stesso booleano (per Dream quella riga è
-    giusta, e Atlas legge l'installazione intera): è registrata a parte. Quindi
+    giusta): è registrata a parte. Quindi
     qui il marcatore negativo è **il testo del puntatore preso dal codice**, non
     il path: un letterale scritto a mano diventerebbe verde da solo il giorno che
     la frase cambia, cioè proverebbe zero.
@@ -244,8 +247,7 @@ def test_a_gardener_pass_is_not_shown_paths_its_toolbox_refuses(tmp_path) -> Non
 def test_everyone_else_still_gets_them(tmp_path) -> None:
     """Il ragionamento è **per attore**, non per specie di sessione.
 
-    Dream monta `allowed_dir=workspace` più `skills/`, Atlas legge l'installazione
-    intera, un subagent ne ha la radice di lettura (T4.5) e una conversazione di
+    Dream monta `allowed_dir=workspace` più `skills/`, un subagent ne ha la radice di lettura (T4.5) e una conversazione di
     progetto legge ovunque per contratto di `agent/project.md`. Per tutti quelli i
     tre percorsi si aprono — e nella chat personale quel listato è l'**unico** posto
     in cui `history.jsonl` viene nominato. Un cancello sul solo «è interno?» li
@@ -259,7 +261,7 @@ def test_everyone_else_still_gets_them(tmp_path) -> None:
         (PERSONAL, None),
         ("project:casa", project),
         ("dream:20260825-120537", None),
-        ("atlas:20260824-215737", None),
+        ("internal:direct", None),
     ):
         prompt = ContextBuilder(root).build_system_prompt(
             channel="internal", session_key=key, workspace=workspace
@@ -335,7 +337,7 @@ def test_a_gardener_pass_does_not_see_the_other_projects(tmp_path) -> None:
 
     Formulato sull'effetto e non sul mezzo, come il gemello di
     ``test_a_project_prompt_does_not_name_another_project``: «non contiene
-    ``## Wiki Directory``» resterebbe verde il giorno in cui la rubrica arriva da
+    ``## Wikis``» resterebbe verde il giorno in cui l'elenco arriva da
     un'altra parte.
 
     Tre ragioni, e la terza è solo sua: la scelta del progetto è già stata fatta
@@ -349,7 +351,7 @@ def test_a_gardener_pass_does_not_see_the_other_projects(tmp_path) -> None:
 
     prompt = _gardener_system_prompt(root)
 
-    assert WIKI_DIRECTORY not in prompt
+    assert WIKIS not in prompt
     for other in ("terapia", "Monstera"):
         assert other not in prompt, f"il prompt della passata su casa nomina {other}"
 

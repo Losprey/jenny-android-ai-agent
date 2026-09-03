@@ -7,9 +7,8 @@ ho ancora letto?»* — e tiene su disco la risposta.
 Lo stato vive in ``<progetto>/.jenny/gardener.json``. Il posto non è nuovo: la
 cartella nascosta di un progetto ospita già i risultati dei tool
 (``.jenny/tool-results/``, v. ``session/project_rename.py``), e sta **fuori da
-tutto** senza che nessuno debba impararlo — ``iter_wiki_sources`` cammina solo
-``wiki/``, quindi fuori dall'impronta di Atlas, e l'inventario della rubrica
-salta i file nascosti. Il quaderno è materiale umano, il cursore è macchinario.
+tutto** senza che nessuno debba impararlo — ``iter_wiki_pages`` cammina solo
+``wiki/`` e salta i file nascosti. Il quaderno è materiale umano, il cursore è macchinario.
 
 **Righe, non byte.** Un conteggio di righe è significativo *perché* il diario è
 append-only, e sopravvive a un editor che riscrive la coda del file; un offset in
@@ -434,7 +433,7 @@ def read_state(root: Path) -> GardenerState:
 def write_state(root: Path, state: GardenerState) -> None:
     """Salva lo stato, potato dei giorni che non esistono più.
 
-    ``atomic_write`` e non ``write_text`` per la stessa ragione di Atlas: uno
+    ``atomic_write`` e non ``write_text`` per la stessa ragione del cursore di Dream: uno
     stato troncato a metà si rilegge come JSON invalido, cioè cursore perso, cioè
     una rilettura da capo che nessuno ha chiesto.
 

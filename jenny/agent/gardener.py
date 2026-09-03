@@ -6,7 +6,7 @@ vera. Due mestieri separati di proposito: la cattura deve costare una chiamata e
 non decidere niente, il giardiniere decide (nomi, struttura, cosa merita una
 pagina) e per farlo ha bisogno di essere solo, a sessione ferma.
 
-**È il gemello di Atlas**, e la somiglianza è deliberata fino ai nomi dei metodi:
+**Ha la forma di Dream**, e la somiglianza è deliberata fino ai nomi dei metodi:
 inventario deterministico costruito in Python e messo nel prompt (al modello resta
 il giudizio, non l'esplorazione), superficie di scrittura chiusa da un
 ``ToolRegistry`` costruito a mano, un solo runner condiviso fra il comando manuale
@@ -23,7 +23,7 @@ Tre cose che questo modulo sa e che vale scrivere:
    cassetta è una via d'uscita**, e ``spawn_subagent``/``python_exec``/``message``
    non ci entrano.
 2. **I percorsi sono relativi al workspace**, non al progetto — per la stessa
-   ragione per cui Atlas mette ``memory/WIKI.md`` e non un assoluto. La base dei
+   ragione per cui Dream scrive ``memory/MEMORY.md`` e non un assoluto. La base dei
    percorsi relativi è ``project_path`` dello scope legato, che per un turno
    interno è la radice dell'installazione; e su Android un assoluto viene
    rifiutato comunque, perché la dir dati è raggiungibile sotto due nomi
@@ -479,7 +479,7 @@ class GardenerStore:
         if len(text) <= cap:
             return text
         # Mai troncare zitti: la nota è la differenza fra "questo è tutto" e
-        # "questo è quanto ci stava" (la lezione di Atlas e del tetto di T3).
+        # "questo è quanto ci stava" (la lezione del tetto di T3).
         return text[:cap] + (
             f"\n\n[{label} continues — {len(text)} characters in all; read the file for the rest]"
         )
@@ -765,7 +765,7 @@ class GardenerStore:
         mentre farebbe *sembrare* enforced una regola che resta del prompt. Il
         difetto qui era la frase, non la cassetta.
 
-        ``.resolve()`` su entrambe le radici per la stessa ragione di Atlas: su
+        ``.resolve()`` su entrambe le radici per la ragione imparata sul telefono: su
         Android la dir dati è esposta come ``/data/user/0/<pkg>`` ma ``resolve()``
         la riscrive in ``/data/data/<pkg>``, e se la base di risoluzione e la
         allowlist restano in forme diverse la guardia anti-symlink scatta e la
@@ -798,7 +798,7 @@ class GardenerStore:
         root = self.root.resolve()
         pages = (root / "wiki").resolve()
 
-        # Lettura: dentro il progetto. Non l'intera installazione come Atlas —
+        # Lettura: dentro il progetto. Non l'intera installazione come Dream —
         # il giardiniere non ha niente da leggere in un altro progetto, e il
         # prompt di progetto dice che il lavoro fra progetti non esiste.
         #
@@ -1169,7 +1169,7 @@ async def _checkpoint(agent: Any) -> None:
     """Checkpoint del workspace prima che la passata scriva. **Fail-open.**
 
     Il giardiniere è il primo lavoro periodico che scrive dentro le cartelle
-    *dell'utente* e non in un file derivato: Atlas ricostruisce ``memory/WIKI.md``
+    *dell'utente* e non in un file derivato: un file derivato si ricostruisce
     al run dopo, una pagina scritta a mano che venisse sovrascritta non si
     ricostruisce da niente — il diario copre solo quel che dal diario è nato.
 
@@ -1312,7 +1312,7 @@ async def run_gardener(
 ) -> GardenerOutcome:
     """Esegue una passata su un progetto e restituisce l'esito.
 
-    Unico punto di ingresso, come ``run_atlas``: lo usano lo slash command
+    Unico punto di ingresso: lo usano lo slash command
     ``/gardener`` e il job cron. Non c'è un ``force``: i tre orologi
     dell'innesco (fermo, distanza, e la scelta di *quale* progetto) stanno nel
     chiamante, e qui resta la sola condizione che è del lavoro e non della
@@ -1583,7 +1583,7 @@ async def _run_pass(
             #
             # **La condizione sta qui e non dentro il predicato** per la stessa
             # ragione per cui ci sta quella di Dream in ``runtime/cron_dispatch.py``:
-            # ``internal_run_should_commit`` è condiviso con Dream e Atlas, la cui
+            # ``internal_run_should_commit`` è condiviso con Dream, la cui
             # semantica non cambia, e un parametro con un default lascerebbe una
             # funzione con due contratti e il default sbagliato a portata del
             # prossimo chiamante. In più il confronto serve comunque qui, per la riga

@@ -65,9 +65,6 @@
     "dream": {
       "title": "Consolida la memoria adesso"
     },
-    "atlas": {
-      "title": "Ricostruisci l'indice della wiki"
-    },
     "gardener": {
       "title": "Trasforma il diario in pagine"
     },
@@ -195,11 +192,6 @@
     "workers": {
       "title": "Wiki e progetti",
       "unavailable": "Non riesco a leggere le impostazioni dei lavoratori periodici. Riapri la schermata; se resta così, controlla config.json.",
-      "atlas": "Atlas",
-      "atlasEnabled": "Rubrica periodica",
-      "atlasInterval": "Ogni quante ore",
-      "atlasMaxContext": "Tetto della rubrica in contesto (token)",
-      "atlasHint": "Atlas compila l'indice di tutte le wiki in memory/WIKI.md. A wiki ferma un giro non costa niente, e l'indice entra in ogni prompt della chat personale — non in quelli di un progetto.",
       "gardener": "Giardiniere",
       "gardenerEnabled": "Passata periodica",
       "gardenerOffHint": "Spegnerla non è disinstallare: /gardener dentro un progetto continua a fare una passata a mano.",

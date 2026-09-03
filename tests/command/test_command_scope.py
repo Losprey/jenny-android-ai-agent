@@ -2,7 +2,7 @@
 
 La domanda «questo comando ha senso qui?» aveva tre risposte in tre punti: un
 cancello nel loop per ``/tidy`` e ``/init``, una frase a mano dentro
-``cmd_gardener``, e **niente** per ``/dream``, ``/atlas``, ``/model`` e
+``cmd_gardener``, e **niente** per ``/dream``, ``/model`` e
 ``/skill``, che dentro un progetto partivano. Il filtro della tendina esisteva ma
 era lato client, e senza autocomplete sullo ``/`` un filtro nel client nasconde
 una voce a chi guarda il menu e non dice niente a chi digita.
@@ -52,13 +52,12 @@ def test_a_command_about_this_conversation_works_in_both(command: str) -> None:
     assert available(_spec(command), _PROJECT)
 
 
-@pytest.mark.parametrize("command", ["/dream", "/atlas", "/model", "/skill"])
+@pytest.mark.parametrize("command", ["/dream", "/model", "/skill"])
 def test_a_command_about_the_person_or_the_install_stops_at_a_project(command: str) -> None:
     """*Chi sei viaggia, dove altro lavori no*: la riga di confine dei prompt.
 
     ``/dream`` consolida ``MEMORY.md``, che una sessione di progetto per
-    costruzione non alimenta; ``/atlas`` ricompila l'indice di tutte le wiki, che
-    ``context.py`` toglie di proposito dal prompt di un progetto; ``/model`` e
+    costruzione non alimenta; ``/model`` e
     ``/skill`` sono stato dell'installazione.
     """
     assert available(_spec(command), UNIFIED_SESSION_KEY)
@@ -92,7 +91,7 @@ def test_the_two_scopes_are_not_one_inside_the_other() -> None:
     personal = {spec.command for spec in visible_specs(UNIFIED_SESSION_KEY)}
     project = {spec.command for spec in visible_specs(_PROJECT)}
 
-    assert personal - project == {"/dream", "/atlas", "/model", "/skill"}
+    assert personal - project == {"/dream", "/model", "/skill"}
     assert project - personal == {"/gardener", "/tidy", "/init"}
 
 

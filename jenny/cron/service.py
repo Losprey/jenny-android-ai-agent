@@ -803,7 +803,7 @@ class CronService:
             # Solo ``every`` è relativo, quindi solo ``every`` poteva perdersi
             # qui: ricalcolarlo a ogni avvio significava "N ore di uptime
             # ininterrotto", non "ogni N ore". Su Android, dove il processo
-            # viene ucciso e rilanciato, una scadenza lunga (Atlas, 12h) non
+            # viene ucciso e rilanciato, una scadenza lunga (sei o dodici ore) non
             # arrivava mai. Conservare quella salvata fa sì che il conto non
             # arretri mai e che una scadenza mancata a app spenta venga
             # recuperata al primo tick.
@@ -1205,7 +1205,7 @@ class CronService:
         # Il conto alla rovescia sopravvive al riavvio. Ricalcolarlo qui a ogni
         # avvio rendeva "ogni N ore" un sinonimo di "dopo N ore di uptime
         # ininterrotto": su un telefono, dove il servizio viene ucciso e
-        # rilanciato, un job lungo come Atlas (12h) poteva non scattare mai,
+        # rilanciato, un job lungo dodici ore poteva non scattare mai,
         # perché ogni ripartenza spostava la scadenza di altre 12 ore.
         # Conservando lo stato la scadenza non arretra mai, quindi il job
         # arriva a scattare anche a colpi di sessioni brevi; se è gia passata

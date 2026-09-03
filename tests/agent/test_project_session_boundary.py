@@ -84,7 +84,7 @@ class TestLaClassificazioneETernaria:
             (CRON, "internal"),
             ("dream:20260821-1200", "internal"),
             ("subagent:abc", "internal"),
-            ("atlas:20260821", "internal"),
+            ("gardener:orto-20260821", "internal"),
             ("internal:direct", "internal"),
             ("heartbeat", "internal"),
         ],

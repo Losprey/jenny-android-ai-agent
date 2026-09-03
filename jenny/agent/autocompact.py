@@ -11,7 +11,6 @@ from loguru import logger
 
 from jenny.security.workspace_access import WorkspaceScopeResolver
 from jenny.session.keys import (
-    ATLAS_SESSION_PREFIX,
     DREAM_SESSION_PREFIX,
     PROJECT_SESSION_PREFIX,
     UNIFIED_SESSION_KEY,
@@ -40,7 +39,7 @@ class AutoCompact:
     # ``is_internal_session_key`` e' una decisione aperta, da prendere a parte.
     # I prefissi arrivano comunque dalle costanti condivise, cosi la *forma*
     # della chiave non puo divergere dal lato che la scrive.
-    _INTERNAL_SESSION_PREFIXES = (DREAM_SESSION_PREFIX, ATLAS_SESSION_PREFIX)
+    _INTERNAL_SESSION_PREFIXES = (DREAM_SESSION_PREFIX,)
 
     # Le sessioni che il giro per inattivita' prende in considerazione, **prima**
     # del recinto di :meth:`_may_archive_for_idleness`. Oggi una sola.

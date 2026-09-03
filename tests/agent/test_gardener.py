@@ -260,7 +260,7 @@ class TestTheTarget:
         """Non è estetica: la base dei percorsi relativi è ``project_path`` dello
         scope legato, che per un turno interno è la radice dell'installazione. E
         un assoluto verrebbe rifiutato comunque — su Android la dir dati ha due
-        nomi e la allowlist ne conosce uno (la trappola già pagata da Atlas)."""
+        nomi e la allowlist ne conosce uno (la trappola già pagata sul telefono)."""
         _project(tmp_path)
         assert _store(tmp_path).rel_root == "wikis/viaggio"
 
@@ -612,7 +612,7 @@ class TestThePrompt:
 
     def test_an_empty_project_says_so_instead_of_listing_nothing(self, tmp_path):
         """Una rubrica che tace si legge come «non c'è niente da sapere», che è
-        il silenzio che T3 ha già pagato una volta sull'inventario di Atlas."""
+        il silenzio che T3 ha già pagato una volta su un inventario."""
         _project(tmp_path)
         store = _store(tmp_path)
         assert "no pages yet" in store.build_prompt(store.read_delta())
@@ -1218,7 +1218,7 @@ class TestTheRun:
 
     async def test_the_state_file_is_not_a_wiki_page(self, tmp_path):
         """Il cursore sta sotto ``.jenny/``: fuori dalle viste, fuori dal grafo,
-        fuori dall'impronta di Atlas — e senza che nessuno dei tre lo impari."""
+        fuori dal prompt — e senza che nessuno dei tre lo impari."""
         root = _project(tmp_path)
 
         await run_gardener(_FakeAgent(tmp_path), _with_states(
@@ -1542,7 +1542,7 @@ class TestYieldingToTheUser:
 
 class TestTheCheckpoint:
     """Il giardiniere è il primo lavoro periodico che scrive dentro le cartelle
-    *dell'utente*, non in un file derivato: Atlas ricostruisce ``memory/WIKI.md``
+    *dell'utente*, non in un file derivato: un file derivato si ricostruisce
     al run dopo, una pagina scritta a mano e sovrascritta non si ricostruisce da
     niente — il diario copre solo quel che dal diario è nato."""
 

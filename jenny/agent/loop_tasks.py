@@ -183,8 +183,8 @@ class LoopTasksMixin:
         **Quattro registri, non tre** (T2.11). ``_file_state_store`` non stava
         qui, e ``AgentLoop`` una voce per chiave di sessione la crea **sempre**,
         a ogni turno (``bind_file_states`` in ``loop.py``): Dream
-        (``dream:<timestamp>``) e Atlas (``atlas:<timestamp>``) coniano una
-        chiave nuova per esecuzione, quindi era una voce morta per run per la
+        (``dream:<timestamp>``) e il giardiniere (``gardener:<progetto>-<timestamp>``)
+        coniano una chiave nuova per esecuzione, quindi era una voce morta per run per la
         vita del processo. Sono byte — 72 per un ``FileStates`` vuoto, e quelle
         voci non vengono nemmeno usate, perche' quei run portano un
         ``FileStates`` esplicito nella loro cassetta — ma illimitati per
@@ -192,8 +192,7 @@ class LoopTasksMixin:
         qui il tetto e' quello che il chiamante ha gia' scelto (``keep=10``).
 
         Chi conia una chiave per esecuzione **e** non puo' aspettare la potatura
-        se la dimentica da se' alla fine del run: v. ``gardener._prune_sessions``
-        e ``atlas._prune_sessions``. Il cron (``cron:<job_id>``) e l'heartbeat
+        se la dimentica da se' alla fine del run: v. ``gardener._prune_sessions``. Il cron (``cron:<job_id>``) e l'heartbeat
         (chiave nuda) non entrano in questo discorso: le loro chiavi sono
         **stabili**, quindi il loro spazio e' finito da se'.
         """

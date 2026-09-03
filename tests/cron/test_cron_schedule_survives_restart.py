@@ -2,7 +2,7 @@
 
 Prima di questi test ogni avvio rimetteva ``next_run_at_ms`` a ``now +
 intervallo``: "ogni N ore" valeva solo con N ore di uptime ininterrotto, e su
-Android un job lungo come Atlas (12h) poteva non scattare mai.
+Android un job lungo dodici ore poteva non scattare mai.
 """
 
 import pytest
@@ -13,10 +13,10 @@ from jenny.cron.types import CronJob, CronPayload, CronSchedule
 _HOUR_MS = 3_600_000
 
 
-def _atlas_job(interval_h: int = 12) -> CronJob:
+def _dream_job(interval_h: int = 12) -> CronJob:
     return CronJob(
-        id="atlas",
-        name="atlas",
+        id="dream",
+        name="dream",
         schedule=CronSchedule(kind="every", every_ms=interval_h * _HOUR_MS),
         payload=CronPayload(kind="system_event"),
     )
@@ -34,17 +34,17 @@ async def test_restart_does_not_push_the_deadline_forward(tmp_path) -> None:
     path = tmp_path / "cron" / "jobs.json"
 
     first = CronService(path)
-    first.register_system_job(_atlas_job())
+    first.register_system_job(_dream_job())
     await first.start()
-    deadline = first.get_job("atlas").state.next_run_at_ms
+    deadline = first.get_job("dream").state.next_run_at_ms
     first.stop()
 
     # Riavvio: stesso store su disco, stesso job di sistema.
     second = CronService(path)
-    second.register_system_job(_atlas_job())
+    second.register_system_job(_dream_job())
     await second.start()
     try:
-        assert second.get_job("atlas").state.next_run_at_ms == deadline
+        assert second.get_job("dream").state.next_run_at_ms == deadline
     finally:
         second.stop()
 
@@ -55,18 +55,18 @@ async def test_missed_deadline_is_recovered_not_rescheduled(tmp_path) -> None:
     path = tmp_path / "cron" / "jobs.json"
 
     first = CronService(path)
-    first.register_system_job(_atlas_job())
+    first.register_system_job(_dream_job())
     first.stop()
 
     overdue = _now_ms() - 60_000
-    first.get_job("atlas").state.next_run_at_ms = overdue
+    first.get_job("dream").state.next_run_at_ms = overdue
     first._save_store()
 
     second = CronService(path)
-    second.register_system_job(_atlas_job())
+    second.register_system_job(_dream_job())
     await second.start()
     try:
-        assert second.get_job("atlas").state.next_run_at_ms == overdue
+        assert second.get_job("dream").state.next_run_at_ms == overdue
     finally:
         second.stop()
 
@@ -77,16 +77,16 @@ async def test_shorter_interval_applies_immediately(tmp_path) -> None:
     path = tmp_path / "cron" / "jobs.json"
 
     first = CronService(path)
-    first.register_system_job(_atlas_job(interval_h=12))
+    first.register_system_job(_dream_job(interval_h=12))
     await first.start()
-    long_deadline = first.get_job("atlas").state.next_run_at_ms
+    long_deadline = first.get_job("dream").state.next_run_at_ms
     first.stop()
 
     second = CronService(path)
-    second.register_system_job(_atlas_job(interval_h=2))
+    second.register_system_job(_dream_job(interval_h=2))
     await second.start()
     try:
-        rescheduled = second.get_job("atlas").state.next_run_at_ms
+        rescheduled = second.get_job("dream").state.next_run_at_ms
         assert rescheduled < long_deadline
         assert rescheduled <= _now_ms() + 2 * _HOUR_MS
     finally:
@@ -133,9 +133,9 @@ def test_corrupt_store_is_handled_where_it_is_first_seen(tmp_path) -> None:
     path.write_text("{ questo non e' JSON ", encoding="utf-8")
 
     service = CronService(path)
-    service.register_system_job(_atlas_job())
+    service.register_system_job(_dream_job())
 
-    assert [j.id for j in service.list_jobs()] == ["atlas"]
+    assert [j.id for j in service.list_jobs()] == ["dream"]
 
 
 @pytest.mark.asyncio

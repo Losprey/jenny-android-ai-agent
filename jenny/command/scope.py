@@ -3,7 +3,7 @@
 **Una regola, un posto.** Prima di questo modulo la domanda «questo comando ha
 senso qui?» aveva tre risposte diverse in tre punti: un cancello nel loop per
 ``/tidy`` e ``/init``, una frase scritta a mano dentro ``cmd_gardener``, e niente
-per ``/dream``, ``/atlas``, ``/model`` e ``/skill`` — che dentro un progetto
+per ``/dream``, ``/model`` e ``/skill`` — che dentro un progetto
 partivano. La tendina del composer filtrava su ``spec.scope``, ma **lato client**:
 non esiste autocomplete sullo ``/``, quindi quel filtro nascondeva una voce a chi
 guardava il menu e non diceva niente a chi digitava.

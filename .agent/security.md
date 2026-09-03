@@ -32,8 +32,8 @@ So "the diary is kept personal" must not be read as symmetric. Personal is not s
 Three narrowings on that gated half, all keyed on the session and all about actors whose write
 surface is a single project — each one is why the previous is not the whole rule:
 
-- a `project:` conversation gets no wiki directory (`memory/WIKI.md`, Atlas's directory of every
-  wiki, person and plant) and no `Recent History` block;
+- a `project:` conversation gets no `## Wikis` block (the list of every wiki with its scope,
+  rendered from `wikis/` at each build) and no `Recent History` block;
 - a **gardener** pass (`gardener:` key) gets neither either (T7.8). Its toolbox reads inside one
   project and writes only in `wikis/<name>/wiki/`, and `agent/gardener.md` tells it to work only
   from the journal, the map and the page inventory. Before this, the pass with no user to talk to
@@ -73,9 +73,9 @@ boundary the gate closes on the read side. **The gardener gets no pointer** — 
 refuse, plus an invitation to open it, is worse than the absence.
 
 **Rule**: when adding an internal actor whose writable surface is one project, gate
-`get_wiki_memory_context`, `read_recent_history_for_prompt` and the `MEMORY.md` block on it — do not
+`_get_wikis_context`, `read_recent_history_for_prompt` and the `MEMORY.md` block on it — do not
 "fix" the identity path (`_IDENTITY_FILES`) to match, and do not widen the gardener's read root (its
-`build_tools` comment, *"Lettura: dentro il progetto. Non l'intera installazione come Atlas"*, is a
+`build_tools` comment, *"Lettura: dentro il progetto. Non l'intera installazione come Dream"*, is a
 boundary somebody chose: T4.5 records a proposed fix that would have silently undone it).
 
 **Closed since 25/08, and the residue is narrower.** `agent/identity.md`'s workspace listing named

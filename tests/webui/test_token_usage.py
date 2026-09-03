@@ -119,9 +119,9 @@ from jenny.session.keys import HEARTBEAT_SESSION_KEY, UNIFIED_SESSION_KEY  # noq
 
 # ── A chi si addebita il lavoro interno ─────────────────────────────────────
 #
-# Misurato sul dispositivo il 25/08, su 27 giorni di `token-usage.json`: i bucket
-# `dream` e `atlas` non erano comparsi **una volta**, con Dream che gira ogni due
-# ore, Atlas su cron e il giardiniere su otto wiki. La causa non era la mappa qui
+# Misurato sul dispositivo il 25/08, su 27 giorni di `token-usage.json`: il bucket
+# `dream` non era comparso **una volta**, con Dream che gira ogni due
+# ore e il giardiniere su otto wiki. La causa non era la mappa qui
 # sotto ma il cancello degli hook (`AgentLoop`, `runs_when_ephemeral`); questa
 # mappa è la seconda metà, e da sola avrebbe mandato il giardiniere nel posto
 # peggiore possibile.

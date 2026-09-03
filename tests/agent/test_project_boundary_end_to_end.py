@@ -45,23 +45,23 @@ def install(tmp_path: pathlib.Path) -> pathlib.Path:
 
     Radice **per test** e non quella della suite: ``conftest`` ne monta una sola
     per tutta la sessione, e scriverci dentro fa trovare i propri file a chi gira
-    dopo (già successo il 22/08, con un test di Atlas caduto a tre cartelle di
+    dopo (già successo il 22/08, con un test caduto a tre cartelle di
     distanza).
     """
     for nome, segreto in (("patreon", "PAROLA-PATREON"), ("etf", "PAROLA-ETF")):
         project = tmp_path / "wikis" / nome
         (project / "wiki").mkdir(parents=True)
         (project / "AGENTS.md").write_text(
-            f"---\nsummary: {nome}\n---\n\n# {nome}\n\n{segreto}\n", encoding="utf-8"
+            # Lo scope di ``etf`` porta il marcatore dell'elenco: e' quel che il
+            # blocco ``## Wikis`` mostra alla chat personale e a nessun progetto.
+            f"---\nsummary: {nome}{' PAROLA-RUBRICA' if nome == 'etf' else ''}\n---\n\n"
+            f"# {nome}\n\n{segreto}\n", encoding="utf-8"
         )
     (tmp_path / "SOUL.md").write_text("Sono Jenny. PAROLA-ANIMA\n", encoding="utf-8")
     (tmp_path / "USER.md").write_text("Si chiama Marta. PAROLA-UTENTE\n", encoding="utf-8")
     memory = tmp_path / "memory"
     memory.mkdir()
     (memory / "MEMORY.md").write_text("# Memoria\n\nPAROLA-MEMORIA\n", encoding="utf-8")
-    (memory / "WIKI.md").write_text(
-        "# Wiki Directory\n\n- **patreon** — PAROLA-RUBRICA\n", encoding="utf-8"
-    )
     return tmp_path
 
 
@@ -87,8 +87,8 @@ def test_a_project_turn_carries_nothing_of_the_other_project(install: pathlib.Pa
 def test_a_project_turn_does_not_even_name_the_other(install: pathlib.Path) -> None:
     """Non è solo il contenuto: è l'*elenco*.
 
-    «Claude Code non ti parla degli altri tuoi repository». La rubrica
-    (``memory/WIKI.md``) è il catalogo di dove sta la roba, e dentro un progetto
+    «Claude Code non ti parla degli altri tuoi repository». L'elenco delle
+    wiki è il catalogo di dove sta la roba, e dentro un progetto
     la scoperta è già finita — col chip l'hai scelto tu.
     """
     prompt = _prompt(install, "patreon")

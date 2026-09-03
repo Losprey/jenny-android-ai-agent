@@ -388,12 +388,10 @@ class WikiRoutes:
 
         wikis_dir = self._get_wikis_dir()
         wikis = list(discover_wikis(wikis_dir).keys())
-        default_wiki = "main" if "main" in wikis else (wikis[0] if wikis else None)
         return http_json_response(
             {
                 "author": "me",
                 "wikis": wikis,
-                "defaultWiki": default_wiki,
                 "homePath": "_index.md",
             }
         )

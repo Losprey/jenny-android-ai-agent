@@ -24,7 +24,7 @@ from jenny.config.schema import (
 def test_defaults() -> None:
     cfg = GardenerConfig()
 
-    # Acceso come Dream e Atlas: senza righe di diario nuove il tick esce prima
+    # Acceso come Dream: senza righe di diario nuove il tick esce prima
     # di qualunque chiamata al provider, quindi su un'installazione che non usa i
     # progetti costa zero.
     assert cfg.enabled is True

@@ -1,8 +1,8 @@
-"""Le manopole dei tre lavoratori periodici in Impostazioni.
+"""Le manopole dei due lavoratori periodici in Impostazioni.
 
 Prima di questa superficie la copertura era a macchia di leopardo: Dream aveva i
 tetti dentro ``/dream budget``, il giardiniere tutto dentro ``/gardener
-settings``, **Atlas niente** — per spegnerlo si editava ``config.json`` a mano,
+settings``, e un terzo lavoratore, poi ritirato, niente — per spegnerlo si editava ``config.json`` a mano,
 che è l'incidente da cui il blocco del giardiniere era nato (un ``sed -i`` che ha
 rotto l'etichetta SELinux del file).
 
@@ -30,7 +30,7 @@ from websockets.http11 import Request as WsRequest
 
 from jenny.channels.http_utils import check_api_secret, http_error, http_json_response, parse_query
 from jenny.config.loader import load_config, save_config
-from jenny.config.schema import AtlasConfig, Config, DreamConfig, GardenerConfig
+from jenny.config.schema import Config, DreamConfig, GardenerConfig
 from jenny.runtime.context import get_runtime_context
 from jenny.webui import worker_settings
 from jenny.webui.settings_api import WebUISettingsError, settings_payload
@@ -68,13 +68,12 @@ def test_payload_carries_both_sections(config_path) -> None:
     payload = settings_payload()
 
     assert payload["memory"]["enabled"] is True
-    assert payload["workers"]["atlas"]["enabled"] is True
     assert payload["workers"]["gardener"]["enabled"] is True
     assert payload["workers"]["compact_projects_when_idle"] is False
 
 
 def test_the_dead_runtime_fields_are_gone(config_path) -> None:
-    """``runtime.dream`` e ``runtime.atlas`` erano serviti e mai disegnati.
+    """``runtime.dream`` (e il gemello poi ritirato) erano serviti e mai disegnati.
 
     Due verità sullo stesso oggetto sono la premessa di una divergenza: ora
     quelle informazioni stanno nelle due sezioni che la UI legge davvero.
@@ -82,7 +81,6 @@ def test_the_dead_runtime_fields_are_gone(config_path) -> None:
     runtime = settings_payload()["runtime"]
 
     assert "dream" not in runtime
-    assert "atlas" not in runtime
 
 
 @pytest.mark.parametrize(
@@ -91,8 +89,6 @@ def test_the_dead_runtime_fields_are_gone(config_path) -> None:
         ("gardener", "interval_min", GardenerConfig, "interval_min"),
         ("gardener", "idle_min", GardenerConfig, "idle_min"),
         ("gardener", "min_hours_between_passes", GardenerConfig, "min_hours_between_passes"),
-        ("atlas", "interval_h", AtlasConfig, "interval_h"),
-        ("atlas", "max_context_tokens", AtlasConfig, "max_context_tokens"),
     ],
 )
 def test_every_number_carries_the_bounds_of_the_schema(
@@ -203,14 +199,6 @@ async def test_camel_case_alias_is_accepted(config_path) -> None:
     assert load_config(config_path).agents.defaults.gardener.idle_min == 45
 
 
-async def test_atlas_can_be_turned_off_at_last(config_path) -> None:
-    """Il lavoratore che non aveva nessuna superficie."""
-    payload = await update_worker_settings({"atlas_enabled": ["0"]})
-
-    assert payload["workers"]["atlas"]["enabled"] is False
-    assert load_config(config_path).agents.defaults.atlas.enabled is False
-
-
 async def test_dream_can_be_turned_off_too(config_path) -> None:
     await update_memory_settings({"dream_enabled": ["false"]})
 
@@ -292,7 +280,6 @@ async def test_turning_the_gardener_off_works_from_an_out_of_range_config(config
         ("gardener_idle_min", "99999", "0–1440"),
         ("gardener_interval_min", "0", "1–1440"),
         ("gardener_min_hours_between_passes", "-1", "0–8760"),
-        ("atlas_max_context_tokens", "10", "100"),
     ],
 )
 async def test_out_of_range_is_refused_and_names_the_range(
@@ -320,7 +307,7 @@ async def test_a_number_that_is_not_a_number_is_refused(config_path, bad: str) -
 @pytest.mark.parametrize("bad", ["", "forse", "2"])
 async def test_a_boolean_that_is_not_a_boolean_is_refused(config_path, bad: str) -> None:
     with pytest.raises(WebUISettingsError, match="boolean"):
-        await update_worker_settings({"atlas_enabled": [bad]})
+        await update_worker_settings({"gardener_enabled": [bad]})
 
 
 async def test_the_review_floor_needs_an_explicit_confirmation(config_path) -> None:
@@ -458,10 +445,10 @@ def _router(on_jobs_changed=None) -> WebUISettingsRouter:
     ["/api/settings/memory/update", "/api/settings/workers/update"],
 )
 async def test_routes_require_auth(config_path, path: str) -> None:
-    response = await _router().dispatch(_request(f"{path}?atlas_enabled=0", token=None), path)
+    response = await _router().dispatch(_request(f"{path}?gardener_enabled=0", token=None), path)
 
     assert response.status_code == 401
-    assert load_config(config_path).agents.defaults.atlas.enabled is True
+    assert load_config(config_path).agents.defaults.gardener.enabled is True
 
 
 async def test_route_persists_and_returns_the_payload(config_path) -> None:
@@ -488,14 +475,8 @@ async def test_a_refusal_becomes_a_400(config_path) -> None:
     [
         ("/api/settings/memory/update", "dream_enabled=0", ["dream"]),
         ("/api/settings/memory/update", "dream_interval_h=4", ["dream"]),
-        ("/api/settings/workers/update", "atlas_interval_h=8", ["atlas"]),
         ("/api/settings/workers/update", "gardener_enabled=0", ["gardener"]),
         ("/api/settings/workers/update", "gardener_interval_min=10", ["gardener"]),
-        (
-            "/api/settings/workers/update",
-            "atlas_enabled=0&gardener_enabled=0",
-            ["atlas", "gardener"],
-        ),
     ],
 )
 async def test_the_job_is_re_armed_for_what_lives_in_the_cron_store(
@@ -521,7 +502,6 @@ async def test_the_job_is_re_armed_for_what_lives_in_the_cron_store(
         ("/api/settings/memory/update", "review_every_runs=24"),
         ("/api/settings/workers/update", "gardener_idle_min=45"),
         ("/api/settings/workers/update", "gardener_min_hours_between_passes=12"),
-        ("/api/settings/workers/update", "atlas_max_context_tokens=800"),
         ("/api/settings/workers/update", "compact_projects_when_idle=1"),
     ],
 )

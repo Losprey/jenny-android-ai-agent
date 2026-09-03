@@ -322,7 +322,7 @@ export class SettingsController {
   // ── Attività in background (doze) ──────────────────────────────────
 
   /* Sezione a sé, non annidata sotto Telegram: il doze differisce cron, Dream,
-     Atlas, promemoria e heartbeat esattamente come rallenta il long-poll, ma
+     promemoria e heartbeat esattamente come rallenta il long-poll, ma
      finché la richiesta viveva solo nella card di pairing chi Telegram non lo
      usa non se la vedeva chiedere mai.
 
@@ -706,10 +706,10 @@ export class SettingsController {
 
   // ── Memoria e lavoratori periodici ─────────────────────────────────
   //
-  // Dream, Atlas e il giardiniere sono i tre job di sistema. Le loro manopole
-  // stavano dentro due slash command (`/dream budget`, `/gardener settings`) e,
-  // per Atlas, in nessun posto: si editava `config.json` a mano, che è
-  // l'incidente da cui quei comandi erano nati. Un comando è un verbo; una
+  // Dream e il giardiniere sono i due job di sistema. Le loro manopole
+  // stavano dentro due slash command (`/dream budget`, `/gardener settings`);
+  // prima ancora si editava `config.json` a mano, che è l'incidente da cui
+  // quei comandi erano nati. Un comando è un verbo; una
   // preferenza che sopravvive al turno sta qui, con le altre diciotto.
   //
   // Due sezioni e non una né tre, sullo stesso confine che il resto del codice
@@ -827,16 +827,8 @@ export class SettingsController {
   _renderWorkers(d) {
     const w = d.workers;
     if (!w) return `<div class="settings-empty">${i18n.t('settings.workers.unavailable')}</div>`;
-    const atlas = w.atlas || {};
     const gardener = w.gardener || {};
     return `
-      <div class="settings-subheading">${i18n.t('settings.workers.atlas')}</div>
-      ${this._toggleRow(i18n.t('settings.workers.atlasEnabled'), 'atlas-enabled-toggle', atlas.enabled)}
-      ${this._hint(`<span id="atlas-schedule">${escapeHtml(this._scheduleText(atlas.enabled, atlas.schedule))}</span>`)}
-      ${this._numberField(i18n.t('settings.workers.atlasInterval'), 'atlas_interval_h', atlas.interval_h)}
-      ${this._numberField(i18n.t('settings.workers.atlasMaxContext'), 'atlas_max_context_tokens', atlas.max_context_tokens)}
-      ${this._hint(i18n.t('settings.workers.atlasHint'))}
-      <div class="settings-divider"></div>
       <div class="settings-subheading">${i18n.t('settings.workers.gardener')}</div>
       ${this._toggleRow(i18n.t('settings.workers.gardenerEnabled'), 'gardener-enabled-toggle', gardener.enabled)}
       ${this._hint(`<span id="gardener-schedule">${escapeHtml(this._scheduleText(gardener.enabled, gardener.schedule))}</span>`)}
@@ -858,7 +850,6 @@ export class SettingsController {
   _wireWorkerSettings() {
     const toggles = [
       ['dream-enabled-toggle', 'memory', 'dream_enabled'],
-      ['atlas-enabled-toggle', 'workers', 'atlas_enabled'],
       ['gardener-enabled-toggle', 'workers', 'gardener_enabled'],
       ['compact-projects-toggle', 'workers', 'compact_projects_when_idle'],
     ];
@@ -881,7 +872,7 @@ export class SettingsController {
     // sulla strada verso "45".
     this.contentEl.querySelectorAll('[data-worker-key]').forEach(el => {
       const key = el.dataset.workerKey;
-      const family = key.startsWith('atlas_') || key.startsWith('gardener_') || key.startsWith('compact_')
+      const family = key.startsWith('gardener_') || key.startsWith('compact_')
         ? 'workers' : 'memory';
       el.addEventListener('change', () => this._saveWorkerNumber(family, key, el));
     });
@@ -920,7 +911,6 @@ export class SettingsController {
   _workerValue(family, key) {
     const data = this.data || {};
     if (family === 'memory') return data.memory?.[key]?.value;
-    if (key.startsWith('atlas_')) return data.workers?.atlas?.[key.slice(6)]?.value;
     if (key.startsWith('gardener_')) return data.workers?.gardener?.[key.slice(9)]?.value;
     return undefined;
   }
@@ -950,10 +940,8 @@ export class SettingsController {
       if (el) el.textContent = text || '';
     };
     const memoryData = this.data?.memory;
-    const atlas = this.data?.workers?.atlas;
     const gardener = this.data?.workers?.gardener;
     set('dream-schedule', this._scheduleText(memoryData?.enabled, memoryData?.schedule));
-    set('atlas-schedule', this._scheduleText(atlas?.enabled, atlas?.schedule));
     set('gardener-schedule', this._scheduleText(gardener?.enabled, gardener?.schedule));
     const memory = this.data?.memory;
     if (!memory) return;

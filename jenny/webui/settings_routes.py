@@ -42,7 +42,6 @@ from jenny.webui.ssh_api import (
     update_ssh_settings,
 )
 from jenny.webui.worker_settings import (
-    ATLAS_REARM_KEYS,
     GARDENER_REARM_KEYS,
     MEMORY_REARM_KEYS,
     update_memory_settings,
@@ -82,7 +81,7 @@ class WebUISettingsRouter:
         self._on_telegram_changed = on_telegram_changed
         # Secondo gancio, e non un allargamento del primo:
         # ``on_settings_changed`` ricostruisce provider e modello, questo ri-arma
-        # un job del cron. Chi cambia l'intervallo di Atlas non deve far
+        # un job del cron. Chi cambia l'intervallo del giardiniere non deve far
         # ricostruire il provider, e chi cambia il modello non deve far ripartire
         # gli orologi.
         self._on_jobs_changed = on_jobs_changed
@@ -204,10 +203,8 @@ class WebUISettingsRouter:
         )
 
     async def _handle_settings_workers_update(self, request: WsRequest) -> Response:
-        """Atlas, il giardiniere, e la compattazione delle chat di progetto."""
+        """Il giardiniere e la compattazione delle chat di progetto."""
         def after(query: QueryParams, payload: dict[str, Any]) -> None:
-            if any(key in query for key in ATLAS_REARM_KEYS):
-                self._fire_jobs_changed("atlas")
             if any(key in query for key in GARDENER_REARM_KEYS):
                 self._fire_jobs_changed("gardener")
 

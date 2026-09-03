@@ -73,7 +73,7 @@ def resolve_turn_visibility(
     bisogno di un caso speciale.
 
     Un turno sul canale interno resta VISIBLE: non c'e nessun utente da
-    raggiungere, e il suo outbound e' il valore di ritorno con cui Dream e Atlas
+    raggiungere, e il suo outbound e' il valore di ritorno con cui Dream e il giardiniere
     leggono l'esito del proprio run.
     """
     marked = (metadata or {}).get(TURN_VISIBILITY_META)

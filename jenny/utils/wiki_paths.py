@@ -9,10 +9,9 @@ suoi helper privati restano dove i chiamanti li hanno sempre trovati.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
     from datetime import date
@@ -351,14 +350,13 @@ def iter_wiki_pages(
     di ricerca cadono qui insieme, e il percorso relativo dice da se' in quale
     delle due si e'.
 
-    Sta in questo strato perche' ha due consumatori: l'inventario della rubrica
-    di Atlas e quello che il giardiniere si mette nel prompt. Prima era privata
-    dentro ``agent/atlas.py``, ed elencare le pagine di una wiki non e' un
-    mestiere di Atlas.
+    Sta in questo strato perche' ha piu' consumatori — l'inventario del
+    giardiniere, l'autocompaction, il blocco di progetto del prompt — e
+    elencare le pagine di una wiki non e' il mestiere di nessuno di loro.
 
     **Perche' il titolo e' opzionale (T3.11).** Estrarlo costa un
     ``read_text()`` **per pagina**, e chi lo usa e' una minoranza: lo mettono
-    nell'elenco l'inventario del giardiniere e quello di Atlas, mentre
+    nell'elenco l'inventario del giardiniere, mentre
     ``ContextBuilder._read_project_pages`` lo buttava via — su ogni pagina di
     ogni wiki, dentro ``build_system_prompt``, cioe' **sul loop dell'evento a
     ogni turno**. Misurato il 23/08 sulle 11 wiki vere (471 pagine): elencare le
@@ -610,97 +608,6 @@ def _frontmatter_scalar(text: str, *keys: str) -> str | None:
             if v and not _is_placeholder(v):
                 return v
     return None
-
-
-# ── Fingerprint ──────────────────────────────────────────────────────────────
-
-# Nomi di cartella esclusi dal fingerprint, cioe' da quel che fa **ripartire
-# Atlas**. Due famiglie, la stessa ragione — cambiano senza che cambi niente di
-# quel che Atlas legge — ma una sola delle due morde davvero:
-#
-# * ``summaries/`` (da :data:`WIKI_PAGES_SKIP_DIRS`) sta **dentro** ``wiki/``,
-#   quindi la camminata la incontra, ed e' fuori dall'inventario di Atlas
-#   (:func:`iter_wiki_pages`), dall'albero, dal grafo e dalla ricerca. Prima di
-#   T9.4 un riassunto riscritto muoveva l'impronta e faceva ripartire una
-#   passata LLM i cui input non erano cambiati di una riga: cioe' esattamente il
-#   guasto che questa costante esiste per evitare, sulla sola cartella che
-#   poteva causarlo.
-# * ``log/`` e ``audit/`` sono **sorelle** di ``wiki/``, non figlie, e il
-#   confronto e' relativo a ``wiki/``: la camminata non le raggiunge mai, quindi
-#   il filtro su di loro e' un no-op. Restano perche' il giorno che una delle
-#   due finisse sotto ``wiki/`` sarebbe l'ora esatta in cui serve, e costa un
-#   ``if``. L'ha misurato T6.11, che di questo insieme aveva trovato il commento
-#   a promettere il contrario.
-#
-# L'indice **resta dentro** l'impronta: e' vero che l'inventario di Atlas non lo
-# legge, ma la mappa e' il riassunto della wiki e riscriverla e' un cambio di
-# contenuto vero. Qui l'errore per eccesso costa una passata, quello per difetto
-# costa una rubrica indietro senza che nessuno lo dica.
-_FINGERPRINT_SKIP_DIRS = WIKI_PAGES_SKIP_DIRS | frozenset({"log", "audit"})
-
-
-def iter_wiki_sources(wikis_dir: Path) -> Iterator[Path]:
-    """I ``.md`` che definiscono il contenuto delle wiki, in ordine stabile.
-
-    Sono il registry ``_index.md``, il file di istruzioni di ogni wiki
-    (``AGENTS.md``, e solo quello — v. :func:`wiki_schema_file`) e le pagine
-    sotto la sua ``wiki/``. Fuori resta tutto il resto della radice — ``log/``,
-    ``audit/``, ``raw/``, ``outputs/`` — perché la camminata parte da ``wiki/``.
-
-    **Quali file sotto ``wiki/``**: quelli che passano :func:`is_wiki_page_rel`
-    con l'insieme piu' largo di :data:`_FINGERPRINT_SKIP_DIRS`, piu' l'indice.
-    Cioe' l'impronta guarda esattamente quel che Atlas legge, ne' piu' ne' meno:
-    un file nascosto o un ``summaries/`` che si muovono non fanno ripartire
-    niente, e nulla di cui l'inventario parli si muove in silenzio.
-    """
-    if not wikis_dir.is_dir():
-        return
-    index = wikis_dir / _WIKIS_REGISTRY_FILENAME
-    if index.is_file():
-        yield index
-    for _name, root in discover_wiki_roots(wikis_dir).items():
-        # Il file di istruzioni sta **dentro** l'impronta: è dove vive lo scope
-        # di una wiki, che è materiale da cui la rubrica si compila. Lasciarlo
-        # fuori vorrebbe dire riscriverlo e vedere Atlas non accorgersene mai.
-        schema = wiki_schema_file(root)
-        if schema is not None:
-            yield schema
-        pages = root / "wiki"
-        for path in sorted(pages.rglob("*.md")):
-            if not is_wiki_page_rel(
-                path.relative_to(pages), skip_dirs=_FINGERPRINT_SKIP_DIRS
-            ):
-                continue
-            yield path
-
-
-def wiki_fingerprint(wikis_dir: Path, extra_paths: Iterable[Path] = ()) -> str:
-    """Impronta del contenuto wiki: sha256 di ``(path, mtime_ns, size)``.
-
-    Serve a rispondere a una sola domanda — "è cambiato qualcosa dall'ultimo
-    run?" — senza leggere i file. *extra_paths* porta dentro input che stanno
-    fuori da ``wikis/`` ma che cambiano il risultato, tipicamente il file di
-    policy dell'utente: se cambiano i criteri, la rubrica va ricompilata anche
-    a wiki ferma.
-
-    Un file assente contribuisce comunque (con marcatore ``-``), così la sua
-    comparsa o sparizione muove l'impronta.
-    """
-    digest = hashlib.sha256()
-    for path in iter_wiki_sources(wikis_dir):
-        digest.update(_stat_line(path, path.relative_to(wikis_dir).as_posix()))
-    for path in sorted(set(extra_paths)):
-        digest.update(_stat_line(path, str(path)))
-    return digest.hexdigest()
-
-
-def _stat_line(path: Path, label: str) -> bytes:
-    try:
-        st = path.stat()
-        marker = f"{st.st_mtime_ns}:{st.st_size}"
-    except OSError:
-        marker = "-"
-    return f"{label}\x00{marker}\n".encode()
 
 
 def has_wikis(wikis_dir: Path) -> bool:

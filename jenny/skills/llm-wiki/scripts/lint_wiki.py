@@ -460,7 +460,7 @@ LIST_MAX_ENTRIES = 20
 
 # Lo stato del lint, dentro la cartella nascosta del progetto: macchinario, non
 # materiale dell'utente — come il cursore del giardiniere, e per la stessa
-# ragione sta fuori da ``wiki/`` (viste, grafo e impronta di Atlas non lo vedono).
+# ragione sta fuori da ``wiki/`` (viste e grafo non lo vedono).
 LINT_STATE_REL = ".jenny/lint_journal.json"
 
 # I tre esiti, e il terzo è quello che mancava. «Input inutilizzabile» non è

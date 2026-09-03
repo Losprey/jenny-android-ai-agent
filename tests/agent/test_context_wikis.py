@@ -3,7 +3,7 @@
 **Il prompt conosce le wiki per nome e scope; il contenuto si legge.** Il blocco
 e' l'elenco delle cartelle sotto ``wikis/`` con la riga di scope di ognuna, reso
 dal disco a ogni build — e' quel che restava di utile della rubrica compilata
-da Atlas, che era il suo *input* (v. ``.agent/retire-atlas-and-main-plan.md``).
+da un modello, ed era il suo *input* (v. ``.agent/retire-atlas-and-main-plan.md``).
 
 Le trappole da tenere chiuse sono quattro: che l'elenco arrivi a un progetto o
 al giardiniere (e' l'inventario degli *altri* soggetti, cioe' la fuga che il
@@ -210,37 +210,3 @@ class TestShape:
         assert WIKIS in prompt
         assert "## Long-term Memory" not in prompt
         assert prompt.count("# Memory\n") == 1
-
-
-class TestSameWikisAsTheCompiledDirectory:
-    """Transitorio: vale finche' ``AtlasStore`` esiste, e si cancella con lui.
-
-    E' il solo commit in cui si puo' asserire che il blocco nuovo nomina le stesse
-    wiki dell'inventario che Atlas riceveva in prompt.
-    """
-
-    def test_same_names_same_scopes(self, tmp_path):
-        from jenny.agent.atlas import AtlasStore
-
-        workspace = _workspace(tmp_path)
-        _wiki(workspace, "erbario", summary="piante di casa")
-        _wiki(workspace, "muta", summary="<placeholder>")
-        _wiki(workspace, "orto", summary="balcone")
-
-        inventory = AtlasStore(workspace).build_inventory()
-        block = _section(ContextBuilder(workspace).build_system_prompt(session_key="unified:default"))
-
-        def names_and_scopes(text: str) -> set[tuple[str, str]]:
-            found = set()
-            for line in text.splitlines():
-                if line.startswith("- **"):
-                    name, rest = line[4:].split("** — ", 1)
-                    scope = rest.split(" (", 1)[0].split(" →", 1)[0]
-                    found.add((name, scope))
-            return found
-
-        assert names_and_scopes(block) == names_and_scopes(inventory) == {
-            ("erbario", "piante di casa"),
-            ("muta", "(no scope set)"),
-            ("orto", "balcone"),
-        }

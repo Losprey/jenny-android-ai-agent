@@ -1,7 +1,7 @@
 """Instradamento del job ``gardener`` nel ``CronDispatcher``.
 
 Il dispatcher non deve contenere logica del giardiniere: sceglie il progetto con
-``pick_project`` e chiama ``run_gardener``. Stesso motivo del gemello Atlas — se
+``pick_project`` e chiama ``run_gardener``. Stesso motivo di Dream — se
 un giorno qualcuno reimplementa qui la selezione, questo test resta verde ma il
 prossimo cambiamento andrà fatto in due posti.
 
@@ -77,8 +77,8 @@ def _dispatcher(agent, config: Config | None = None) -> CronDispatcher:
 def _workspace(tmp_path, monkeypatch):
     """``Config.workspace_path`` viene dal contesto runtime, non dal campo.
 
-    Non è un dettaglio da test: è la stessa strada che ``_run_atlas`` percorre
-    (``AtlasStore.from_config(self._config.workspace_path, ...)``), quindi
+    Non è un dettaglio da test: è la stessa strada che ``_run_gardener`` percorre
+    (``GardenerStore`` costruito da ``self._config.workspace_path``), quindi
     spostare il workspace qui prova il dispatcher nelle condizioni vere.
 
     Il ``config_path`` è fissato qui insieme al workspace perché ``_run_gardener``

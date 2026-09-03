@@ -156,46 +156,6 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
-class AtlasConfig(Base):
-    """Atlas wiki-directory configuration.
-
-    Atlas è il gemello di Dream sul lato wiki: compila ``memory/WIKI.md``
-    leggendo ``workspace/wikis/``. Il default è ``enabled`` perché senza wiki
-    il job esce prima di qualunque chiamata al provider — a workspace vuoto
-    costa zero token.
-    """
-
-    _HOUR_MS = 3_600_000
-
-    enabled: bool = True  # Register the periodic Atlas job on startup
-    # Sei ore, non due come Dream: una wiki cambia con la cadenza con cui
-    # l'utente ci fa ingest, non con quella delle conversazioni. Il fingerprint
-    # rende comunque gratuiti i tick a wiki ferma.
-    # Non dodici, però: su Android il doze allunga i tick (misurato, un job da
-    # 30 minuti scattava fino a 83) e il processo non sopravvive sempre mezza
-    # giornata. Una scadenza a sei ore cade dentro una sessione plausibile
-    # dell'app; una a dodici rischiava di non arrivare mai.
-    interval_h: int = Field(default=6, ge=1)
-    # Tetto del blocco iniettato in *ogni* system prompt: la rubrica è utile
-    # perché è corta. Oltre questa soglia viene troncata a valle, così un run
-    # generoso non si porta dietro il costo su tutti i turni successivi.
-    max_context_tokens: int = Field(
-        default=1200,
-        ge=100,
-        validation_alias=AliasChoices("maxContextTokens", "max_context_tokens"),
-        serialization_alias="maxContextTokens",
-    )
-
-    def build_schedule(self) -> CronSchedule:
-        """Build the runtime schedule from the configured interval."""
-        return CronSchedule(kind="every", every_ms=self.interval_h * self._HOUR_MS)
-
-    def describe_schedule(self) -> str:
-        """Return a human-readable summary for logs and startup output."""
-        hours = self.interval_h
-        return f"every {hours}h"
-
-
 # Tetti dei tre numeri del giardiniere. Stanno in costanti, e non solo nel ``le=``
 # dei campi, perché il comando ``/gardener`` li nomina nei suoi rifiuti: un range
 # scritto due volte diventa due range appena uno dei due cambia.
@@ -222,8 +182,8 @@ GARDENER_DISTANCE_HOURS_MAX = 8760
 class GardenerConfig(Base):
     """Il giardiniere: promuove il diario dei progetti in pagine, a mente fredda.
 
-    Terzo lavoro periodico interno dopo Dream e Atlas, e come loro **acceso di
-    default**. La ragione è la stessa dei fratelli, e vale la pena scriverla
+    Secondo lavoro periodico interno dopo Dream, e come lui **acceso di
+    default**. La ragione è la stessa di Dream, e vale la pena scriverla
     perché questo è il primo che scrive dentro le cartelle *dell'utente* e non in
     un file derivato: senza righe di diario nuove il tick esce prima di qualunque
     chiamata al provider, quindi su un'installazione che non usa i progetti costa
@@ -430,7 +390,6 @@ class AgentDefaults(Base):
     max_messages: int = Field(default=120, ge=0)
     consolidation_ratio: float = Field(default=0.5, ge=0.1, le=0.95)
     dream: DreamConfig = Field(default_factory=DreamConfig)
-    atlas: AtlasConfig = Field(default_factory=AtlasConfig)
     gardener: GardenerConfig = Field(default_factory=GardenerConfig)
     model_preset: str | None = Field(
         default=None,
@@ -663,7 +622,6 @@ class WikiConfig(Base):
 
     enabled: bool = True
     wikis_dir: str = "wikis"  # Relativo a workspace
-    default_wiki: str = "main"
     extensions: list[str] = Field(default_factory=lambda: [
         "fenced_code",
         "tables",

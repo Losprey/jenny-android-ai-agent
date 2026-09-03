@@ -401,7 +401,6 @@ class CronTool(Tool, ContextAware):
         # aggiunga anche qui.
         purposes = {
             "dream": "Dream memory consolidation for long-term memory.",
-            "atlas": "Atlas wiki directory: rebuilds memory/WIKI.md from your wikis.",
             "heartbeat": "Heartbeat: checks HEARTBEAT.md for tasks you left for Jenny.",
             "update_check": (
                 "Update check: looks for a newer Jenny app release and tells you "

@@ -1,16 +1,16 @@
 """Le regole comuni a ogni run interno: è finito bene, e può dichiararlo.
 
-Dream, Atlas e il giardiniere sono tre mestieri diversi con la stessa forma: un
+Dream e il giardiniere sono due mestieri diversi con la stessa forma: un
 turno effimero che legge un input, scrive qualcosa, e poi **registra di averlo
-digerito** — il cursore su ``history.jsonl``, il fingerprint della wiki, il
+digerito** — il cursore su ``history.jsonl``, il
 delta del diario di un progetto. Il progresso è un'affermazione, e farla dopo un
 run che non ha prodotto nulla significa perdere quell'input per sempre: non è una
-somiglianza estetica fra i tre, è la stessa invariante, e sta scritta una volta.
+somiglianza estetica fra i due, è la stessa invariante, e sta scritta una volta.
 
 Vive in un modulo suo e non su ``MemoryStore`` perché quella classe è documentata
 come «pure file I/O for memory files», e questa non è I/O sui file di memoria:
-Atlas non ne apre nessuno, il giardiniere nemmeno. Prima erano ``@staticmethod``
-lì, e ``atlas.py``/``gardener.py`` importavano ``MemoryStore`` dentro la funzione
+il giardiniere non ne apre nessuno. Prima erano ``@staticmethod``
+lì, e ``gardener.py`` importava ``MemoryStore`` dentro la funzione
 soltanto per raggiungerle — un import locale che non serviva a rompere un ciclo,
 ma a mascherare una collocazione sbagliata (v. la disciplina in
 ``.agent/design.md``).
@@ -40,8 +40,8 @@ def internal_run_should_commit(
 ) -> bool:
     """Return True quando un run interno può registrare il proprio progresso.
 
-    Regola condivisa da Dream (avanzamento del cursore su ``history.jsonl``),
-    da Atlas (avanzamento del fingerprint della wiki) e dal giardiniere
+    Regola condivisa da Dream (avanzamento del cursore su ``history.jsonl``)
+    e dal giardiniere
     (avanzamento del cursore sul diario di un progetto). In tutti i casi il
     progresso è un'affermazione — "questo input è stato digerito" — e farla dopo
     un run che non ha prodotto nulla per un blocco di policy significa perdere
@@ -82,7 +82,7 @@ def internal_run_should_commit(
     **Cosa questa regola non copre.** ``writes_ok > 0`` risponde "qualcosa è
     atterrato", non "tutto è atterrato": un run con ``ok=2, attempted=3`` e
     nessun rifiuto di *budget* — una scrittura bloccata dalla policy, o
-    fallita in I/O — passa. Per Dream e Atlas è la semantica voluta; a chi
+    fallita in I/O — passa. Per Dream è la semantica voluta; a chi
     vuole tenere il progresso anche su un fallimento parziale la condizione in
     più tocca **aggiungerla al proprio punto di chiamata**, come fa il
     giardiniere (``agent/gardener.py``) e come fa Dream per l'atterraggio del
