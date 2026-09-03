@@ -339,5 +339,69 @@ sessione che ha visto Atlas misura Atlas.
 
 ## Com'e' finita
 
-*(da scrivere quando e' girato: cosa e' cambiato rispetto a qui, le misure della
-verifica, e cosa si e' rotto togliendo le garanzie — la calibrazione.)*
+Fatto il 03/09/2026, in giornata, sul ramo `feat/retire-atlas-and-main` — dieci
+commit firmati, nell'ordine del piano (A con Atlas vivo, D col codice vecchio,
+poi B, C, docs, versione, e una correzione trovata sul telefono).
+
+| | esito |
+| --- | --- |
+| suite | 9.156 verdi su 3.14, 9.155 su 3.11 (7/8 skip di piattaforma); ruff pulito; pyright 0 sul sottoinsieme bloccante |
+| A, costo | 0,25 ms mediana su 10 wiki e 400 pagine (Mac), 1.137 caratteri ≈ 285 token |
+| accettazione statica | `atlas` in `jenny/`: le tre voci di D (job ritirato, chiavi ritirate, pattern dei file), il bucket legacy, e il nome di questo piano. In `docs/`: tre frasi che dicono cosa e' stato ritirato |
+| APK | 0.10.0 / versionCode 15, firmata, `assets/jenny_src` identico al repo |
+
+**Verificato sul telefono, due avvii.** Primo avvio: `retired system job atlas (0
+run records)`, undici file spazzati (`WIKI.md`, `.atlas_state.json`, nove sessioni),
+`Config schema stamped at version 2` con `agents.defaults.atlas` e `wiki.defaultWiki`
+assenti dal file e il `.bak` con le categorie MLS dell'app, `MEMORY.md` e
+`history.jsonl` con lo stesso md5 di prima. `cron/jobs.json`: dream, gardener,
+heartbeat, update_check. Secondo avvio: zero righe di ritiro (idempotente), zero
+traceback, giornale del cron a 0 byte. `/api/settings`: `workers` = gardener +
+compattazione. `/api/config`: niente `defaultWiki`. `/atlas`: comando sconosciuto.
+
+**Il blocco, letto dal telefono.** Chiesto alla chat personale di copiare
+testualmente il `## Wikis` del proprio prompt: 13 righe, una per cartella, in
+ordine alfabetico, con quattro `(no scope set)` (le stesse quattro), zero tool
+call, 11,7 s. Dentro un progetto la stessa domanda risponde `NESSUNO` in 2,3 s,
+zero tool call: il cancello tiene.
+
+### Due cose che sono andate diversamente da qui
+
+**Il ritiro del job cron ha prodotto sei traceback in due minuti** al primo
+avvio: `KeyError: 'atlas'` da `_merge_action`. `retire_system_job` girava prima di
+`start()` e quindi scriveva nel giornale delle azioni, come fa `remove_job` a
+servizio fermo; `register_system_job`, un attimo dopo, salvava lo store senza il
+job; ogni `_load_store` rigiocava la riga «del» su uno store che il job non
+l'aveva piu', `pop` sollevava e il `continue` saltava `changed = True` — quindi il
+giornale non si svuotava mai. Innocuo (il cron ha continuato a scattare: Dream e'
+girato alle 23:34) ma **per sempre**. Due correzioni, una generale e una locale:
+un «del» per un job assente e' un no-op che conta come applicato, e il ritiro
+salva lo store direttamente come la registrazione con cui condivide la fase. Il
+test riproduce entrambe. La lezione e' quella di sempre: D1 aveva un test verde
+che costruiva lo stato vecchio con il codice vero, ma non passava dal giro
+completo «avvio, salva, ricarica» — cioe' misurava il meccanismo e non il montaggio.
+
+**Il primo APK portava ancora `jenny/agent/atlas.py`.** `assets/jenny_src/` e'
+un mirror scritto da un task Gradle `Copy`, che non toglie mai quel che e' sparito
+dalla sorgente; `app.imy`, il codice che gira davvero, era pulito. Ora i due
+mirror sono `Sync`, e il controllo e' una differenza di insiemi fra l'elenco
+dell'APK e `find jenny -name '*.py'` (v. memoria *release-builds-need-a-clean-worktree*).
+
+**La prima domanda di verifica ha misurato la cronologia, non il prompt.** «Quali
+wiki hai?» sulla sessione personale calda ha risposto con le cinque wiki di cui
+si era parlato negli ultimi turni, in 2,5 s e senza tool — sbagliato, e non per
+colpa del blocco, che c'era intero (la seconda domanda, «copia il blocco», l'ha
+dimostrato). E' esattamente l'avvertenza scritta sopra sulla sessione fresca, e
+vale come misura: **la domanda giusta e' quella che chiede il prompt, non quella
+che chiede la memoria**.
+
+### Resta aperto
+
+- **G.5 e G.7** (il soggetto con pagina apre l'indice prima di rispondere; il
+  nome inesistente finisce in un `grep`; e tutto rifatto con un secondo modello) —
+  vanno in una sessione fresca, e questa installazione ha un provider solo.
+- **Il richiamo spontaneo** nei turni non guidati: non misurato, come previsto.
+- **I dati.** Mentre il codice finiva, l'utente ha gia' cominciato lo smontaggio
+  dal telefono: `nomadismo`, `piante`, `produttivita`, `travel-wiki` esistono con
+  il loro `summary:`, e `wikis/main` non c'e' piu'. Le quattro `(no scope set)`
+  (adhd, allergie, etf-finance, patreon-creator) sono ancora da riempire.
