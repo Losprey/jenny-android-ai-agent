@@ -16,7 +16,7 @@ There is no in-app "new wiki" form: everything starts as a chat request.
 
 **The wiki does not update itself.** Ingesting a source doesn't automatically compile it into pages, and pages don't automatically get relinted after you edit them — each of those steps only happens when you (or a scheduled task you've set up) explicitly asks Jenny to do it.
 
-The one thing that *does* happen on its own is the reverse direction: a background job called **Atlas** reads your wikis every 12 hours and compiles a short directory of them into `memory/WIKI.md`, which Jenny loads at the start of every conversation. It never writes to the wiki — it only reads it. See [Atlas](./memory.md#atlas-the-wiki-side-of-memory).
+The one thing that *does* happen on its own is the reverse direction: the personal chat's system prompt lists every wiki you have — name and one-line scope, read from disk on every turn — so Jenny knows a wiki exists and what it is about before she opens it. See [How Jenny knows which wikis you have](./memory.md#how-jenny-knows-which-wikis-you-have).
 
 ## Wikis and projects
 

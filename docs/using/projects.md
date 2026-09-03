@@ -36,9 +36,9 @@ Subfolders under `wiki/` are allowed, not required. Wikis that existed before th
 | Where writes may land | Anywhere in the workspace | **Only inside its own folder** |
 | Reminders, cron, scheduled jobs | Yes | Refused — Jenny tells you to switch to the personal chat |
 | Mini-app data | Read and write | Read yes, change no (mini-apps and their data are personal) |
-| Prompt carries | Your profile, plus Atlas's [wiki directory](./memory.md#atlas-the-wiki-side-of-memory) | Your profile, plus **this project's** map and pages — not the wiki directory |
+| Prompt carries | Your profile, plus the [list of your wikis](./memory.md#how-jenny-knows-which-wikis-you-have) | Your profile, plus **this project's** map and pages — not the list of the other wikis |
 
-The memory boundary is deliberately **one-directional**, and it is worth reading twice: *who you are travels into a project, where else you work does not.* `SOUL.md`, `USER.md` and `memory/MEMORY.md` are read from the installation root and reach a project's turns, so Jenny still knows your language, your habits and your context while working there. What does not reach a project is the cross-project inventory (`memory/WIKI.md`) and the tail of your personal conversation. And nothing said inside a project flows back the other way: it is not archived into `memory/history.jsonl`, so Dream never sees it and it cannot end up in `MEMORY.md`.
+The memory boundary is deliberately **one-directional**, and it is worth reading twice: *who you are travels into a project, where else you work does not.* `SOUL.md`, `USER.md` and `memory/MEMORY.md` are read from the installation root and reach a project's turns, so Jenny still knows your language, your habits and your context while working there. What does not reach a project is the cross-project inventory (the `## Wikis` block) and the tail of your personal conversation. And nothing said inside a project flows back the other way: it is not archived into `memory/history.jsonl`, so Dream never sees it and it cannot end up in `MEMORY.md`.
 
 The practical consequence: **a project is not private from Jenny, and the personal chat is not informed by it.** If you want something you said in a project to be part of Jenny's general knowledge of you, say it in the personal chat too.
 
@@ -151,5 +151,5 @@ Two folders swapping names is refused rather than guessed at, and a project whos
 
 - [The gardener](./gardener.md) — the background pass that turns journal lines into pages, when it runs, and how to turn it off.
 - [Wiki](./wiki.md) — the graph and page views, and the audit/feedback workflow, which work on projects too.
-- [Memory, Dream and Atlas](./memory.md) — the personal side of remembering, and the budgets.
+- [Memory and Dream](./memory.md) — the personal side of remembering, and the budgets.
 - [Slash commands](./slash-commands.md) — `/gardener`, `/init` and the rest.

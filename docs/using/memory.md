@@ -1,8 +1,8 @@
-# Memory, Dream and Atlas
+# Memory and Dream
 
 Jenny keeps two very different kinds of memory: the live conversation you're having right now, and a set of durable text files that survive across chats, app restarts, and (if you back up) phone changes.
 
-Two background processes maintain those files. **Dream** distils your conversations into what Jenny knows about you and your work. **Atlas** does the same for [your wikis](./wiki.md), compiling them into a directory of the people, projects and systems that matter. They have separate files and cannot write to each other's.
+One background process maintains those files: **Dream** distils your conversations into what Jenny knows about you and your work. [Your wikis](./wiki.md) are not memory in this sense — they are something you wrote down — and they reach the prompt differently: as a list of names and scopes, read from disk on every turn (see [How Jenny knows which wikis you have](#how-jenny-knows-which-wikis-you-have)).
 
 ## The shape of memory
 
@@ -11,7 +11,6 @@ Jenny does not treat memory as one giant file. It separates it into layers, beca
 - The live chat — what you're seeing on screen right now.
 - `memory/history.jsonl` — a running archive of compressed past turns.
 - `SOUL.md`, `USER.md`, and `memory/MEMORY.md` — the durable knowledge files that Jenny actually reads at the start of every conversation.
-- `memory/WIKI.md` — the wiki directory, read at the start of every conversation too, but built from your wikis rather than from your chats.
 
 This keeps a single chat fast in the moment, while still letting Jenny build up a durable picture of you and the project over weeks of use.
 
@@ -70,19 +69,13 @@ If you run `/dream` on a chat that just started, or one that's still short, Jenn
 
 Concretely, `/dream` will tell you this and suggest enabling automatic idle compaction (`idleCompactAfterMinutes`) so completed chats become Dream input on their own, or waiting until the current chat actually gets compacted.
 
-## Atlas: the wiki side of memory
+## How Jenny knows which wikis you have
 
-Dream reads your conversations. Atlas reads [your wikis](./wiki.md) and maintains one file, `memory/WIKI.md` — a directory, not a summary. It lists every wiki you have with a one-line scope, then the entities from your main wiki that matter operationally: people you actually deal with, projects you're running, systems you operate. Each entry is one line plus a `[[wikilink]]` to the page that holds the detail.
+The system prompt of the personal chat carries a `## Wikis` block: one line per folder under `workspace/wikis/`, with the wiki's name, its one-line scope (the `summary:` in its `AGENTS.md`) and the path of its index. It is rendered from disk on every turn — there is no file behind it, nothing to rebuild and nothing that can fall behind: a wiki you created a minute ago is already listed.
 
-The point is what it saves you. Without it, "what's the nickname of that plant I'm monitoring?" costs Jenny a few tool calls through the wiki. With it, the answer is already in the prompt.
+That is deliberately all it carries. The prompt knows your wikis by name and scope; the content is read when a question touches it — Jenny opens `wikis/<name>/wiki/index.md` before answering about one of those subjects, and greps `wikis/` when she needs to know whether something is recorded anywhere. A wiki whose scope line is missing shows up as `(no scope set)`, on purpose: a wiki whose one line is not enough to decide whether to open it is a wiki that needs a scope, or needs splitting.
 
-Three things worth knowing about how Atlas behaves:
-
-- **It runs every 12 hours, but usually does nothing.** Before calling the model, Atlas fingerprints your wiki pages. If nothing changed since the last run, it stops there — no tokens, no battery. `log/` and `audit/` are deliberately excluded from that fingerprint, so routine lint and audit activity doesn't trigger pointless rebuilds.
-- **It can only write `memory/WIKI.md`.** Not `MEMORY.md`, not `SOUL.md`, not `USER.md`, and not the wiki it reads from. That's a sandbox, not a convention — the tools it runs with have no other writable path.
-- **It updates by difference.** Entries that are still correct keep their wording; new pages get added, deleted ones get removed.
-
-You can steer what goes in. Create `memory/WIKI_POLICY.md` in your workspace and write your own inclusion rules in plain language — "plants only if I've given them a nickname", "no medical topics", "skip anything archived over three months". Those rules override the generic criteria. Changing that file also changes the fingerprint, so the next run picks it up.
+Two things follow. The block is withheld from [project](./projects.md) conversations and from [gardener](./gardener.md) passes — inside a project, the list of your other subjects is exactly the cross-project inventory the boundary keeps out. And there is no compiled directory of entities any more: versions before 0.10.0 built one from the wikis with a periodic job (Atlas) into `memory/WIKI.md`. That job, its config block and its files are removed at the first start of a version without it; nothing you wrote is touched.
 
 ## The files
 
@@ -92,12 +85,9 @@ workspace/
 ├── USER.md               # Stable knowledge about you: identity, preferences, communication style
 └── memory/
     ├── MEMORY.md         # Project facts, decisions, and durable context
-    ├── WIKI.md           # Wiki directory (Atlas output) — do not hand-edit, it gets rebuilt
-    ├── WIKI_POLICY.md    # Optional: your own rules for what belongs in the directory
     ├── history.jsonl     # Append-only history summaries (Consolidator output)
     ├── .cursor           # Consolidator write cursor
-    ├── .dream_cursor     # Dream read cursor
-    └── .atlas_state.json # Atlas wiki fingerprint
+    └── .dream_cursor     # Dream read cursor
 ```
 
 These files play different roles:
@@ -105,7 +95,6 @@ These files play different roles:
 - `SOUL.md` remembers how Jenny should behave and sound — guardrails, interaction patterns, tool-use strategy.
 - `USER.md` remembers who you are and what you prefer — identity, habits, language, tone, reply length.
 - `MEMORY.md` remembers what remains true about the work itself — goals, decisions, infrastructure.
-- `WIKI.md` remembers what's *in* your wikis — a switchboard of names and links, not the content itself.
 - `history.jsonl` remembers what happened on the way there, as compressed, timestamped summaries.
 - Recurring workflows can also be promoted into `workspace/skills/<name>/SKILL.md` by Dream, rather than staying as prose inside `MEMORY.md` or `USER.md`.
 
@@ -123,21 +112,20 @@ At the start of every conversation, Jenny's system prompt includes:
 
 - `SOUL.md` and `USER.md`, loaded as bootstrap files.
 - `MEMORY.md`, if it has real content (an untouched template file isn't injected).
-- `memory/WIKI.md`, if Atlas has built one. It sits under the same "Memory" heading as `MEMORY.md` but is injected independently — an untouched `MEMORY.md` doesn't suppress it — and is capped at roughly 1,200 tokens so a long directory can't tax every turn.
+- The `## Wikis` block: one line per wiki under `workspace/wikis/` — its name and one-line scope — rendered from disk at every build. It sits under the same "Memory" heading as `MEMORY.md` but is injected independently — an untouched `MEMORY.md` doesn't suppress it — and never inside a project conversation.
 - Any history entries from `memory/history.jsonl` that Dream hasn't processed yet (capped to the last 50 entries / roughly 8,000 tokens of text) — this is the bridge between "compacted but not yet dreamed" and the durable files.
 
 So a brand-new chat isn't a blank slate: it inherits your durable profile and project notes from the last Dream pass, plus whatever's been compacted since then but not yet folded in.
 
-Note the asymmetry in that list. `WIKI.md` and the pending history are *capped* at injection time; `SOUL.md`, `USER.md` and `MEMORY.md` are injected **whole**, at whatever length they happen to be, on every single turn. That is on purpose — see [The budgets bound what Dream writes, not what a turn pays](#the-budgets-bound-what-dream-writes-not-what-a-turn-pays).
+Note the asymmetry in that list. The pending history is *capped* at injection time; `SOUL.md`, `USER.md` and `MEMORY.md` are injected **whole**, at whatever length they happen to be, on every single turn. That is on purpose — see [The budgets bound what Dream writes, not what a turn pays](#the-budgets-bound-what-dream-writes-not-what-a-turn-pays).
 
 ## Commands
 
 | Command | What it does |
 |---------|--------------|
 | `/dream` | Runs Dream immediately instead of waiting for the next scheduled pass. Replies "Dreaming..." right away, then follows up with the outcome once it finishes (completed and how long it took, completed-but-wrote-nothing, failed, or nothing to process). When a review pass ran first, the note also says how many characters it freed, how many facts it moved into `memory/archive/` (with the ids to ask for them back), and how many writes were refused by a size budget and never landed — that last one is usually the explanation for "nothing was freed". |
-| `/atlas` | Rebuilds the wiki directory now. If nothing in your wikis changed since the last run it says so and spends nothing; `/atlas force` rebuilds anyway. |
 
-Both are verbs: they do something now, and they take no settings. Both are also **personal-chat commands** — inside a [project](./projects.md) they are refused, because a project conversation never feeds the personal memory and the wiki directory is deliberately kept out of its prompt. See [Slash commands](./slash-commands.md#where-a-command-works).
+It is a verb: it does something now, and takes no settings. It is also a **personal-chat command** — inside a [project](./projects.md) it is refused, because a project conversation never feeds the personal memory. See [Slash commands](./slash-commands.md#where-a-command-works).
 
 ## The knobs: Settings → Memory
 
@@ -201,39 +189,13 @@ It used to be a confirmation *phrase* to retype (`/dream budget review 1 i-accep
 
 ### The budgets bound what Dream writes, not what a turn pays
 
-These are budgets on the *files*, not on the prompt. There is no read-side cap on `SOUL.md`, `USER.md` or `memory/MEMORY.md`: each one is injected into the system prompt whole, on every turn, however long it has become — and `SOUL.md` has no write-side budget either, since `soulBudgetChars` ships at `0`. Everything else injected alongside them *is* capped: `memory/WIKI.md` at ~1,200 tokens, the unprocessed history at ~8,000, the page content inside a [project](./projects.md) at 6,000 characters. The three durable files are the deliberate exception. (`AGENTS.md` is a fourth file loaded unfiltered, and it has no budget and no curator at all — that one is an open question, not a decision.)
+These are budgets on the *files*, not on the prompt. There is no read-side cap on `SOUL.md`, `USER.md` or `memory/MEMORY.md`: each one is injected into the system prompt whole, on every turn, however long it has become — and `SOUL.md` has no write-side budget either, since `soulBudgetChars` ships at `0`. Everything else injected alongside them *is* capped: the unprocessed history at ~8,000, the page content inside a [project](./projects.md) at 6,000 characters. The three durable files are the deliberate exception. (`AGENTS.md` is a fourth file loaded unfiltered, and it has no budget and no curator at all — that one is an open question, not a decision.)
 
 The reason is that a cap at injection time would be a limit with nobody behind it. What actually keeps these files small is the review pass: it reads a file before deciding, and *moves* what doesn't belong there rather than dropping it. That is what took `SOUL.md` from 6,447 characters to about 2,100 in under a week — by relocating platform notes into the app's own bundled templates, where they get rewritten at every boot. A cap can't do that. It can't tell Jenny's identity from a stale implementation note; it would cut whichever of the two happens to sit at the end of the file, on every turn, and report it to nobody who could act. A refused write, by contrast, leaves the file intact and tells the writer, the log, the counters and — if it keeps happening — you.
 
-The other half of the reason is that these files are terminal. A truncated line in the wiki directory costs you a link, and the page it pointed at is still one `read_file` away; the tail of `USER.md` is not written down anywhere else, so a "the rest is over there" notice would have nothing to point at.
+The other half of the reason is that these files are terminal. A truncated line in the `## Wikis` block costs you a pointer, and the wiki it named is still one `read_file` away; the tail of `USER.md` is not written down anywhere else, so a "the rest is over there" notice would have nothing to point at.
 
 What that leaves you responsible for: the system prompt is a fixed cost, so if these files ever do get big, it's the live conversation that gets compacted earlier to make room. The sizes in Settings → Memory are the numbers to watch, and they are numbers to act on rather than a wall that will act for you.
-
-### Atlas
-
-Atlas has its own block, `agents.defaults.atlas`, with the same shape plus a size cap:
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "atlas": {
-        "enabled": true,
-        "intervalH": 6,
-        "maxContextTokens": 1200
-      }
-    }
-  }
-}
-```
-
-| Field | Meaning | Default |
-|-------|---------|---------|
-| `enabled` | Whether the periodic Atlas job is registered. Leaving it on costs nothing if you have no wikis — the job exits before calling the model. | `true` |
-| `intervalH` | How often Atlas checks whether the wiki changed, in hours. | `6` |
-| `maxContextTokens` | Hard cap on the directory block injected into every prompt. A longer `WIKI.md` is truncated at injection time. | `1200` |
-
-Which wiki supplies the entity list follows `wiki.defaultWiki` (default `main`); the wiki *list* always covers every wiki under `wiki.wikisDir`.
 
 ### Related settings, and where to change them
 
@@ -249,8 +211,6 @@ Related settings that shape *when* material reaches Dream in the first place (no
 - **`/dream` on a short or fresh chat will say there's nothing to process.** That's because Dream reads `memory/history.jsonl`, not the live chat — see above.
 - **Memory files are visible in the file browser by default, no Developer mode needed.** If you go looking for `MEMORY.md` in the Workspace tab and don't see it, the more likely explanation is that it's still an untouched template with no real content yet. Developer mode (Settings → System) only reveals dotfiles and runtime-internal folders like `agent/`, `cron/`, and `sessions/` — it doesn't gate the memory files.
 - **If the provider is down when the Consolidator needs to summarize, it degrades to a raw `[RAW]` dump** instead of a clean summary — you don't lose the content, but it won't read as nicely until a later pass cleans it up.
-- **Hand edits to `memory/WIKI.md` don't survive.** Atlas rebuilds that file from the wiki. To change what it contains, change the wiki or write your rules into `memory/WIKI_POLICY.md`.
-- **Atlas has no pre-run snapshot, unlike Dream.** It doesn't need one: `WIKI.md` is derived from your wikis, so the worst case is losing it until the next run rebuilds it. Dream rewrites memory that exists nowhere else, which is why *it* gets a checkpoint.
 - **Dream's own model, interval, and batch size are not independently configurable today** — despite what an earlier draft of this documentation implied, there is no `modelOverride` field: Dream always uses the same model as your main agent, and there is no `maxBatchSize` or `cron` override to reach for.
 
 ## In practice

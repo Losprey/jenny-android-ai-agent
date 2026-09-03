@@ -15,7 +15,7 @@ You can type them by hand, or pick them from the **Commands** chip in the row ab
 | Acts on | Commands | Where |
 |---|---|---|
 | **this conversation** | `/new` `/stop` `/status` `/history` `/goal` `/help` | anywhere |
-| **the personal memory, or the installation** | `/dream` `/atlas` `/model` `/skill` | the personal chat only |
+| **the personal memory, or the installation** | `/dream` `/model` `/skill` | the personal chat only |
 | **this project** | `/gardener` `/tidy` `/init` | inside a [project](./projects.md) only |
 
 Both halves are enforced, and both are visible: the Commands chip lists what this conversation can do — entering a project *removes* `/dream` and friends as well as adding `/tidy` — and `/help` prints the same list. Sending one anyway is refused with a line that says where it does work, and the refusal comes from the command layer: it never reaches the model as a message.
@@ -37,7 +37,6 @@ All server-side command responses below are **hardcoded in English**, regardless
 | `/history` | `[n]` | Prints the last `n` persisted user/assistant messages (default 10, max 50) |
 | `/goal` | `<description>` | Tells the agent to treat the request as a long-running goal |
 | `/dream` | none | Manually triggers a memory consolidation (Dream) run in the background |
-| `/atlas` | `[force]` | Rebuilds the wiki directory (`memory/WIKI.md`) from your wikis, in the background |
 | `/gardener` | none | Runs one [gardener](./gardener.md) pass on the project you are in, now |
 | `/skill` | none | Lists the currently enabled skills with their descriptions |
 | `/help` | none | Lists the commands of this conversation |
@@ -199,31 +198,9 @@ Dream did not complete after 4.2s; memory cursor was not advanced.
 Dream failed after 4.2s: <error>
 ```
 
-If there's no new history to process yet (common on a fresh or short chat, since Dream only reads from `memory/history.jsonl`, which is only populated after compaction), you get a longer explanation instead, ending with suggestions like enabling `idleCompactAfterMinutes`. See [Memory, Dream and Atlas](./memory.md) for the full model.
+If there's no new history to process yet (common on a fresh or short chat, since Dream only reads from `memory/history.jsonl`, which is only populated after compaction), you get a longer explanation instead, ending with suggestions like enabling `idleCompactAfterMinutes`. See [Memory and Dream](./memory.md) for the full model.
 
 The command takes no arguments. The three file budgets, the review cadence, and Dream's own schedule are in **Settings → Memory**, which also shows what each file currently measures — the number the budget is chosen from. `/dream budget …` answers with a line saying so.
-
-### `/atlas` — rebuild the wiki directory now
-
-Triggers Atlas, the job that compiles your wikis into `memory/WIKI.md`. Like `/dream` it acknowledges immediately:
-
-```text
-Mapping the wiki...
-```
-
-and follows up with the outcome. The interesting cases are the ones where it deliberately does nothing:
-
-```text
-Atlas updated `memory/WIKI.md` in 6.4s.
-```
-```text
-The wiki hasn't changed since the last Atlas run, so `memory/WIKI.md` is already current — no tokens spent. Use `/atlas force` to rebuild it anyway.
-```
-```text
-Atlas found no wikis to map.
-```
-
-`/atlas force` skips the change check and rebuilds regardless. It does not skip the "do you have any wikis" check — with no wikis there is nothing to compile. See [Atlas](./memory.md#atlas-the-wiki-side-of-memory).
 
 ### `/gardener` — run a gardener pass on this project
 
@@ -278,12 +255,11 @@ In the personal chat:
 /history [n] — Print the last N persisted conversation messages.
 /goal <goal> — Tell the agent to treat the request as a long-running goal.
 /dream — Manually trigger memory consolidation now. The budgets and the review cadence live in Settings, under Memory.
-/atlas [force] — Rebuild the wiki directory in memory/WIKI.md. Add 'force' to skip the change check.
 /skill — List enabled skills and their descriptions.
 /help — List available slash commands.
 ```
 
-Inside a project the list is a different one, not a longer one: `/dream`, `/atlas`, `/model` and `/skill` drop out, and `/gardener`, `/tidy` and `/init` appear.
+Inside a project the list is a different one, not a longer one: `/dream`, `/model` and `/skill` drop out, and `/gardener`, `/tidy` and `/init` appear.
 
 ## What `/new` does and does not delete
 
@@ -307,7 +283,7 @@ This is unrelated to slash commands but shares the same "plain files, no termina
 ## See also
 
 - [Chat basics](./chat.md) for the message composer, streaming, and the "Agent running" banner referenced above.
-- [Memory, Dream and Atlas](./memory.md) for what `/dream` and `/atlas` actually process, and why either can say there's nothing to do.
+- [Memory and Dream](./memory.md) for what `/dream` actually processes, and why it can say there's nothing to do.
 - [Scheduling and proactivity](./scheduling.md) for `/goal`, reminders, and the heartbeat.
 - [Configuration reference](../reference/configuration.md) for `modelPresets` and other config-only settings.
 - [Troubleshooting](./troubleshooting.md) if a command's response looks wrong or the chat seems unresponsive.

@@ -120,5 +120,5 @@ Scrolling to the very top of the chat automatically loads older history (infinit
 - [Scheduling and proactivity](scheduling.md) — why delegation is the normal path, the six subagent types, and what Jenny can do to a running subagent from her side.
 - [Files and attachments](attachments.md) — sending images/files, attachment limits, and what the agent can actually read from them.
 - [Slash commands](slash-commands.md) — the command list, including `/stop` and `/new`, which commands work where, and the Commands chip that shows the ones this conversation can use.
-- [Memory, Dream and Atlas](memory.md) — the difference between what stays on screen and what the model actually remembers.
+- [Memory and Dream](memory.md) — the difference between what stays on screen and what the model actually remembers.
 - [Settings](../reference/settings.md) and [Configuration reference](../reference/configuration.md) — where "Reasoning effort" and `websocket.showReasoning` live.

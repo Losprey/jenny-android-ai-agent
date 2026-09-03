@@ -118,9 +118,8 @@ Dream's schedule and the three file budgets, all of which used to be config-only
 
 ## Wiki and projects
 
-The other two periodic workers, plus one project-side switch.
+The other periodic worker, plus one project-side switch.
 
-- **Atlas** — `enabled`, `intervalH`, and `maxContextTokens`, the cap on the block it injects into context. With no wikis present the job exits before reaching the provider.
 - **The gardener** — `enabled`, `intervalMin`, `idleMin`, `minHoursBetweenPasses`. The section carries a hint spelling out that turning it off is not uninstalling it: the wikis stay, nothing prunes them.
 - **`compactProjectsWhenIdle`** — whether idle project chats get compacted. It takes effect from the next start, which the field says on the spot rather than leaving you to wonder why nothing changed.
 

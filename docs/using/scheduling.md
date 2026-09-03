@@ -95,17 +95,14 @@ Monitor mode only makes sense on a repeating schedule, so **it cannot be combine
 
 ### Protected system jobs
 
-When you ask Jenny to list reminders, you'll also see three jobs you didn't create: **`dream`**, **`atlas`** and **`heartbeat`**. These are system-managed and will show up as protected — visible for inspection, but Jenny will refuse to remove them if asked (a removal attempt gets a reply along the lines of "this is a protected system-managed cron job" and cannot be removed). The way to stop one is its config switch, not the reminder list.
+When you ask Jenny to list reminders, you'll also see jobs you didn't create: **`dream`**, **`heartbeat`**, and — when they are on — the [gardener](gardener.md) and the update check. These are system-managed and will show up as protected — visible for inspection, but Jenny will refuse to remove them if asked (a removal attempt gets a reply along the lines of "this is a protected system-managed cron job" and cannot be removed). The way to stop one is its config switch, not the reminder list.
 
 | Job | Runs | Config | What it costs you |
 |---|---|---|---|
 | `dream` | every **2 hours** | `agents.defaults.dream.enabled` (default on), `agents.defaults.dream.intervalH` (default `2`) | One agent run — a real turn against your provider, several calls if it uses tools — whenever there is new conversation to consolidate. Takes a snapshot first, so a bad run is undoable. |
-| `atlas` | every **6 hours** | `agents.defaults.atlas.enabled` (default on), `agents.defaults.atlas.intervalH` (default `6`) | Nothing at all when your wikis haven't changed — a fingerprint check runs first and the job exits before touching the provider. One agent run when they have. |
 | `heartbeat` | every **30 minutes** | `gateway.heartbeat.enabled` (default on), `gateway.heartbeat.intervalS` (default `1800`) | Nothing when `## Active Tasks` is empty; one real turn when it isn't. See below. |
 
-`dream` runs the memory-consolidation pass and `atlas` rebuilds the wiki directory (`memory/WIKI.md`), both described in [Memory, Dream and Atlas](memory.md); `heartbeat` is described next.
-
-**Atlas never says anything.** Unlike a reminder or Heartbeat, it produces no chat message and no notification whether it ran, skipped, or failed — the only visible output is `memory/WIKI.md` changing and the entity list Jenny quotes in later turns getting more accurate. That silence is deliberate (a directory rebuild is not news), but it means the six-hourly token cost is invisible too: when your wikis *have* changed, every run is a real turn against your provider, and you will only see it in Settings → System → Token usage. If you don't use the wiki at all, the job costs nothing and you can leave it alone; if you want it off anyway, that is `agents.defaults.atlas.enabled`. `/atlas` runs it on demand, and `/atlas force` runs it even when the fingerprint says nothing changed.
+`dream` runs the memory-consolidation pass, described in [Memory and Dream](memory.md); `heartbeat` is described next.
 
 ### If the reminder list itself gets damaged
 
@@ -207,7 +204,7 @@ None of the proactive messages above are guaranteed to make a sound — whether 
 
 ## Related pages
 
-- [Memory, Dream and Atlas](memory.md) — what the `dream` and `atlas` system jobs (visible in your reminders list) actually do.
+- [Memory and Dream](memory.md) — what the `dream` system job (visible in your reminders list) actually does.
 - [Telegram bridge](telegram.md) — how proactive deliveries (Heartbeat, reminders, monitors) reach a paired Telegram chat.
 - [Troubleshooting](troubleshooting.md) — what to check when a reminder never arrives, and how to tell a silent monitor apart from a broken one.
 - [Slash commands](slash-commands.md) — full reference for `/goal`, `/stop`, and the rest.
