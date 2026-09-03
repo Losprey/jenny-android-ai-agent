@@ -36,8 +36,10 @@ from jenny.utils.wiki_paths import (
     LEGACY_WIKI_SCHEMA_FILENAME,
     WIKI_INDEX_FILENAME,
     WIKI_SCHEMA_FILENAME,
+    discover_wiki_roots,
     is_wiki_root,
     iter_wiki_pages,
+    read_wiki_scope,
     wiki_schema_file,
 )
 
@@ -76,6 +78,23 @@ _PROJECT_PAGES_MAX_CHARS = 6000
 # Fallback quando ContextBuilder è costruito senza config (test, tool isolati):
 # stesso valore del default di ``AtlasConfig.max_context_tokens``.
 _DEFAULT_WIKI_DIRECTORY_TOKENS = 1200
+
+# Tetto del blocco ``## Wikis`` (v. :meth:`ContextBuilder._get_wikis_context`).
+# Costante e non manopola: il blocco e' una riga per wiki, quindi cresce col
+# numero di cartelle sotto ``wikis/`` e con niente altro — dieci wiki sono ~250
+# token. Il tetto e' l'ultima linea di difesa contro uno ``summary:`` scritto
+# come un saggio, non un budget da tarare.
+_WIKIS_BLOCK_MAX_TOKENS = 1500
+
+# La frase che precede l'elenco. E' l'unica prosa del blocco, quindi l'unica
+# cosa che vive in un prompt e non in un meccanismo: cambiarla e' cambiare cosa
+# il modello fa con l'elenco, e va ricalibrato sul telefono
+# (``.agent/retire-atlas-and-main-plan.md``, «Verifica sul telefono»).
+_WIKIS_BLOCK_LEAD = (
+    "Your wikis live under `{wikis_dir}/`. Open `{wikis_dir}/<name>/wiki/index.md` "
+    "before answering about one of these subjects; to find out whether something is "
+    "recorded anywhere, grep `{wikis_dir}/`."
+)
 
 # Il nome del tool che fa da interruttore ad ``agent/scheduling.md``. Costante e
 # non ``CronTool.name``: importare il tool qui tirerebbe dentro tutto il package
@@ -505,9 +524,17 @@ class ContextBuilder:
         orchestrator: bool = False,
         available_tools: Callable[[], list[str]] | None = None,
         wiki_directory_max_tokens: int | None = None,
+        wikis_dir_name: str = "wikis",
+        wikis_enabled: bool = True,
     ):
         self.workspace = workspace
         self.timezone = timezone
+        # La cartella delle wiki e l'interruttore della funzione, dalla config
+        # (``config.wiki.wikis_dir`` e ``config.wiki.enabled``): il blocco
+        # ``## Wikis`` elenca quel che c'e' in quella cartella, e a funzione
+        # spenta non deve nominarla.
+        self.wikis_dir_name = wikis_dir_name or "wikis"
+        self.wikis_enabled = wikis_enabled
         # Callable e non lista: il registry non esiste ancora quando ``AgentLoop``
         # costruisce questo oggetto, e comunque i tool delle Jenny App cambiano
         # a runtime. Chiuderlo su una lista significherebbe pubblicare un
@@ -800,6 +827,14 @@ class ContextBuilder:
             wiki_directory = self.memory.get_wiki_memory_context(self.wiki_directory_max_tokens)
             if wiki_directory:
                 memory_sections.append(wiki_directory)
+        # L'elenco delle wiki, reso dal disco a ogni build. Stesso cancello della
+        # rubrica qui sopra, per le stesse due ragioni: dentro un progetto la
+        # scelta e' gia' fatta, e l'elenco degli altri soggetti e' la versione di
+        # lato della fuga che il confine dei progetti chiude.
+        if not (is_project or is_gardener):
+            wikis_block = self._get_wikis_context()
+            if wikis_block:
+                memory_sections.append(wikis_block)
         # Terza sottosezione, e la piu' economica: una riga che dice che il tier
         # freddo esiste. Senza, l'archivio della fase 2 sarebbe indistinguibile
         # da una cancellazione dal punto di vista di chi deve rispondere — ed e'
@@ -915,6 +950,51 @@ class ContextBuilder:
             # Workspace di una versione precedente, dove questo template non e
             # ancora stato estratto: si perde l'inventario, non il prompt.
             return None
+
+    def _get_wikis_context(self) -> str:
+        """Il blocco ``## Wikis``: nome e scope di ogni wiki, letti dal disco.
+
+        **Il prompt conosce le wiki per nome e scope; il contenuto si legge.** E'
+        l'invariante che sostituisce la rubrica compilata da un modello: quel che
+        vale di quella rubrica — l'elenco — era il suo *input*, calcolato qui in
+        Python e ricopiato dal modello ogni sei ore. Reso a ogni build e' piu'
+        fresco (una wiki creata un minuto fa c'e' gia') e non ha uno stato che
+        possa restare indietro.
+
+        Tre scelte, e la ragione di ognuna:
+
+        - **Niente conteggio pagine.** Costerebbe una camminata su ``wiki/`` per
+          wiki per turno (12 ms su undici wiki, misurato per il giardiniere); il
+          blocco deve essere piatto nel numero di pagine, come la riga
+          dell'archivio. Quel che si legge e' una ``listdir`` piu' un ``AGENTS.md``
+          per wiki.
+        - **Lo scope mancante si stampa cosi' com'e'** — ``(no scope set)``. E' il
+          sintomo che fa riempire ``summary:``: una wiki la cui riga non basta a
+          decidere se aprirla e' una wiki da spezzare o da descrivere, e
+          nasconderlo rimetterebbe al riparo esattamente il calderone che questo
+          blocco esiste per rendere visibile.
+        - **Ordine alfabetico** (lo da' gia' ``discover_wikis``): il blocco cambia
+          solo quando cambia una wiki, e il prefisso del prompt resta stabile per
+          la cache del provider.
+
+        Stringa vuota se la funzione e' spenta, se la cartella non c'e' o e'
+        vuota: un blocco che dice «nessuna wiki» e' costo senza informazione.
+        """
+        if not self.wikis_enabled:
+            return ""
+        try:
+            roots = discover_wiki_roots(self.workspace / self.wikis_dir_name)
+        except OSError:
+            return ""
+        if not roots:
+            return ""
+        lines = [
+            f"- **{name}** — {read_wiki_scope(root)} "
+            f"→ {self.wikis_dir_name}/{name}/wiki/index.md"
+            for name, root in roots.items()
+        ]
+        body = _WIKIS_BLOCK_LEAD.format(wikis_dir=self.wikis_dir_name) + "\n" + "\n".join(lines)
+        return "## Wikis\n" + truncate_text_to_tokens(body, _WIKIS_BLOCK_MAX_TOKENS)
 
     def _get_identity(
         self,

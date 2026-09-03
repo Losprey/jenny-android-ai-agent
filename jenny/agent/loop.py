@@ -256,6 +256,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         disabled_skills: list[str] | None = None,
         wiki_directory_max_tokens: int | None = None,
         projects_subdir: str = "wikis",
+        wikis_enabled: bool = True,
         tools_config: ToolsConfig | None = None,
         runtime_events: RuntimeEventBus | None = None,
         model_presets_config: dict[str, Any] | None = None,
@@ -344,6 +345,10 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             orchestrator=self.orchestrator_mode,
             available_tools=lambda: self.tools.tool_names,
             wiki_directory_max_tokens=wiki_directory_max_tokens,
+            # La stessa cartella dei progetti (v. sopra): il blocco ``## Wikis``
+            # e il picker devono elencare le stesse cartelle.
+            wikis_dir_name=projects_subdir,
+            wikis_enabled=wikis_enabled,
         )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -489,6 +494,7 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             disabled_skills=defaults.disabled_skills,
             wiki_directory_max_tokens=defaults.atlas.max_context_tokens,
             projects_subdir=config.wiki.wikis_dir,
+            wikis_enabled=config.wiki.enabled,
             session_ttl_minutes=defaults.session_ttl_minutes,
             compact_projects_when_idle=defaults.compact_projects_when_idle,
             consolidation_ratio=defaults.consolidation_ratio,
