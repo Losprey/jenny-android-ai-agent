@@ -132,7 +132,6 @@ from jenny.session.keys import HEARTBEAT_SESSION_KEY, UNIFIED_SESSION_KEY  # noq
     [
         ("dream:20260825-120537", "dream"),
         ("dream:review-20260825-060415", "dream"),
-        ("atlas:20260824-215737", "atlas"),
         ("gardener:viaggio-pazzo-20260824-195702", "gardener"),
         ("cron:update_check", "cron"),
         # Le due chiavi senza suffisso vengono dalle **costanti**, non da un
@@ -161,6 +160,34 @@ def test_internal_work_is_billed_to_itself(session_key, expected) -> None:
     from jenny.agent.token_usage import _source_from_session_key
 
     assert _source_from_session_key(session_key) == expected
+
+
+def test_a_retired_bucket_keeps_its_label_in_the_ledger() -> None:
+    """``atlas`` non spende piu' — nessun kind ci mappa — ma i giorni gia' scritti
+    lo portano, e un registro non rietichetta la spesa passata: senza la chiave in
+    `_SOURCE_KEYS` quel giorno passerebbe a `"system"` alla prima rilettura."""
+    from jenny.agent.token_usage import (
+        _INTERNAL_KIND_TO_SOURCE,
+        _SOURCE_KEYS,
+        normalize_token_usage_state,
+    )
+
+    assert "atlas" not in _INTERNAL_KIND_TO_SOURCE.values()
+    assert "atlas" in _SOURCE_KEYS
+    state = normalize_token_usage_state({
+        "days": {
+            "2026-09-01": {
+                "prompt_tokens": 900, "completion_tokens": 100, "total_tokens": 1000,
+                "requests": 1,
+                "sources": {"atlas": {
+                    "prompt_tokens": 900, "completion_tokens": 100, "total_tokens": 1000,
+                    "requests": 1,
+                }},
+            }
+        }
+    })
+
+    assert set(state["days"]["2026-09-01"]["sources"]) == {"atlas"}
 
 
 def test_every_bucket_the_map_names_is_a_declared_source() -> None:
