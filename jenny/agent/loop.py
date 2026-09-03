@@ -33,6 +33,7 @@ from jenny.agent.tools.context import (
 )
 from jenny.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from jenny.agent.tools.message import MessageTool
+from jenny.agent.tools.nothing_to_report import declared_marker_lines
 from jenny.agent.tools.registry import ToolRegistry
 from jenny.agent.tools.self import MyTool
 from jenny.agent.turn_epochs import TurnEpochs, TurnToken
@@ -2040,7 +2041,11 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
             # ``final_text`` viaggia anche qui: un turno silenzioso non consegna
             # nulla, ma la sua risposta finale resta l'unico posto in cui il
             # modello puo' dichiarare un esito su di se' senza parlare.
-            text = final_content or ""
+            # Un'astensione dichiarata col tool ``nothing_to_report`` vale come la
+            # riga che il modello avrebbe dovuto scrivere: la si trascrive qui,
+            # dopo ``_finalize_turn_save``, cosi' il verdetto arriva al
+            # registratore senza entrare nella history.
+            text = (final_content or "") + self._nothing_to_report_lines()
             if followup is not None:
                 # L'esito di un controllo delegato si scrive qui e in nessun
                 # altro posto: questo turno non torna al dispatcher cron — è
@@ -2203,8 +2208,25 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
         return TurnOutcome.of(
             ctx.outbound,
             spoke_via_tool=ctx.spoke_via_tool,
-            final_text=ctx.final_content or "",
+            # Il gate e' ``ctx.silent`` e non "il tool ha rifiutato":
+            # ``TurnOutcome.delivered`` fa ``final_text or message.content``,
+            # quindi una riga sintetica su un turno consegnato sostituirebbe il
+            # testo consegnato come esito registrato. ``ctx.final_content`` resta
+            # intatto — la history della sessione e' gia' stata scritta da SAVE.
+            final_text=(ctx.final_content or "")
+            + (self._nothing_to_report_lines(ctx.tools) if ctx.silent else ""),
         )
+
+    def _nothing_to_report_lines(self, tools: ToolRegistry | None = None) -> str:
+        """Le righe di marcatore che il turno ha dichiarato astenendosi.
+
+        Vuota quasi sempre, e vuota per costruzione fuori da un turno silenzioso.
+        *tools* esiste per la stessa ragione per cui esiste in
+        :meth:`_message_tool_spoke`: lo stato vive in una ContextVar **per
+        istanza**, e con un registry sostituito leggere l'istanza di default
+        darebbe sempre la risposta sbagliata.
+        """
+        return declared_marker_lines((tools or self.tools).get("nothing_to_report"))
 
     def _message_tool_spoke(self, tools: ToolRegistry | None = None) -> bool:
         """Il tool ``message`` ha già consegnato verso il target d'origine in questo turno.

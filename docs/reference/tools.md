@@ -12,7 +12,7 @@ There is no fixed tool count. What Jenny actually has available in a given conve
 
 - **The agent's scope** — the main agent loads either the `orchestrator` scope (default, see `agents.defaults.orchestratorMode`) or the historical `core` scope; a subagent loads the `subagent` scope, narrowed further by its agent type. The four SSH tools sit in a scope of their own, `remote`, which **no** agent loads by default — only the `sysadmin` subagent type asks for it. The same install therefore exposes different tools to the orchestrator, to a `sysadmin` subagent, and to every other subagent.
 
-The built-in count is **41**: 40 tools registered through the standard loader (`jenny/agent/tools/loader.py`, 22 modules) plus `my`, which is registered by hand because it needs a live reference to the running agent loop (`jenny/agent/loop.py`). Two more reach the registry the same hand-built way and for the same reason — `memory_entry`, which needs the memory store, and the per-app action tool — so the loader's module list is not a complete inventory of the tool surface. No single agent sees all of them at once — see the scope note above. Add to that N dynamic app tools. If you ask Jenny to list its tools, expect the number to vary between installs.
+The built-in count is **42**: 41 tools registered through the standard loader (`jenny/agent/tools/loader.py`, 23 modules) plus `my`, which is registered by hand because it needs a live reference to the running agent loop (`jenny/agent/loop.py`). Two more reach the registry the same hand-built way and for the same reason — `memory_entry`, which needs the memory store, and the per-app action tool — so the loader's module list is not a complete inventory of the tool surface. No single agent sees all of them at once — see the scope note above. Add to that N dynamic app tools. If you ask Jenny to list its tools, expect the number to vary between installs.
 
 Below, tools are grouped into ten categories. Each entry gives the exact tool name the model calls, what it does for you in practice, the parameters worth knowing, hard numeric limits, the config toggle that controls it, and any gotcha worth knowing before you rely on it.
 
@@ -432,6 +432,19 @@ Config: none — always registered; `security.restrictToWorkspace` constrains wh
 
 Gotcha: if the model uses `message` instead of a normal reply for the current conversation, the turn's own final reply is suppressed to avoid sending the same content twice — this explains some chat behavior that otherwise looks like a missing response.
 
+### nothing_to_report
+
+The counterpart to `message` on a silent scheduled run (Heartbeat, a monitor reminder, or the turn where a subagent's result comes back to one of them). On those turns Jenny's written answer is delivered nowhere, so `message` is the only way to reach you — which made "I have nothing to say" the *absence* of an action, and small models express that by sending a message with a placeholder in it. Real examples that reached the chat before this tool existed: `silent`, `noop`, `placeholder`, `tutte le piante ok`, and two empty bubbles.
+
+- `task` is optional: the number of the check being declared, as listed in that run's prompt. One call per number.
+- Nothing is delivered and no notification is raised. A run that calls it is still recorded as `silenced`, exactly like one that said nothing at all.
+- Passing a number also records that check as having produced its answer (the `CHECK_OK` verdict described under [Heartbeat](../using/scheduling.md#heartbeat-a-periodic-checklist)), which is what lets a check that had been failing be remembered as working again. Calling it *without* a number deliberately records no verdict — "I have nothing to say" is not the same claim as "the check ran fine", and treating them as one would let a broken check be filed as healthy.
+- On a normal conversation turn it declines and tells the model to just answer.
+
+Config: none — always registered.
+
+Gotcha: it is not a way to report a check that *failed*. A check that could not be carried out is a `CHECK_FAILED` line in the answer text; that distinction is what drives the "could not check" escalation.
+
 ---
 
 ## 7. Self-diagnosis
@@ -607,7 +620,7 @@ Settings → Tools in the WebUI governs exactly two things, and SSH gets a secti
 
 The SSH switch is **asymmetric**, which is worth knowing before you file a bug: turning it *off* takes effect immediately, mid-turn, because it is meant to work as an emergency stop; turning it back *on* (or adding the very first host) only takes effect after a gateway restart, because the tools are built at startup.
 
-`cron`, `spawn`, `long_task`/`complete_goal`, `message`, `download_file`, `get_source`, `ui_view`, and app tools have no on/off switch tied to a UI element at all — they're either always registered when their prerequisites exist, or controlled only from config.json.
+`cron`, `spawn`, `long_task`/`complete_goal`, `message`, `nothing_to_report`, `download_file`, `get_source`, `ui_view`, and app tools have no on/off switch tied to a UI element at all — they're either always registered when their prerequisites exist, or controlled only from config.json.
 
 ## Shared boundaries
 

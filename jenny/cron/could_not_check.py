@@ -11,6 +11,21 @@ modello debba imparare, non può raggiungere l'utente per sbaglio, e non costa
 una chiamata LLM in più. Un tool dedicato sarebbe invece comparso nell'elenco di
 OGNI turno, chat comprese: il registry di un turno cron è quello di default.
 
+**Quel prezzo è stato poi pagato, per un caso solo, e vale sapere quale.**
+``nothing_to_report`` (``agent/tools/nothing_to_report.py``) è un tool dedicato,
+sta davvero nell'elenco di ogni turno, e il paragrafo qui sopra resta vero: il
+suo schema pesa 757 caratteri — ~190 token su ogni richiesta, chat comprese, il
+3,8% del payload dei tool. Ciò che è cambiato è la misura dall'altra parte. I
+marcatori qui descrivono *che cosa* dichiarare, e per quello il testo finale
+basta; non risolvono il
+problema opposto, cioè che su un turno silenzioso **tacere non è un'azione**, e
+un modello piccolo l'assenza di azione la codifica come ``message`` con dentro
+una parola qualunque. Quattordici bolle di riempimento arrivate in chat fra il 21
+agosto e il 3 settembre 2026, cinque dopo il guardiano in
+``message.py::_unusable_silent_alert``. Il tool non sostituisce i marcatori: ne
+scrive uno (``CHECK_OK <n>``, e solo se il numero è esplicito) come effetto di
+un'azione che il modello può compiere.
+
 Da non confondere col sentinella rifiutato in ``AgentLoop._process_message``: là
 si decideva **se consegnare**, cioè un atto con un effetto sull'utente, e per
 quello il tool ``message`` è e resta l'unica strada. Qui il modello non consegna

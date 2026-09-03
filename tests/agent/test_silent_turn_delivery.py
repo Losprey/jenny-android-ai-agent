@@ -340,7 +340,11 @@ class TestTheAnnouncePromptFollowsTheVisibility:
 
         assert "you are the turn that decides" in text
         assert "`message` tool" in text
-        assert "call nothing and end the turn" in text
+        # Le due uscite, e nessuna delle due è "non fare niente": è l'istruzione
+        # che il modello non sapeva eseguire, ed è da lì che venivano le bolle
+        # `placeholder` / `silent-skip` misurate sul dispositivo il 3/09/2026.
+        assert "`nothing_to_report`" in text
+        assert "call nothing and end the turn" not in text
 
     def test_a_silent_announce_is_not_told_to_summarize_for_the_user(self) -> None:
         assert "Summarize this naturally" not in self._rendered(silent=True)
