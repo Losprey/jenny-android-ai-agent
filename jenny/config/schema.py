@@ -771,7 +771,7 @@ class ModelPresetConfig(Base):
 
 # Versione corrente dello schema del config. Alzala di uno ogni volta che
 # aggiungi un ramo a ``Config._migrate_by_version``, mai altrimenti.
-CURRENT_CONFIG_VERSION = 1
+CURRENT_CONFIG_VERSION = 2
 
 # Migrazioni gia annunciate in questo processo. Solo per il log: la migrazione
 # resta idempotente e rigira a ogni parse finche il file non viene riscritto (lo
@@ -878,6 +878,18 @@ class Config(BaseSettings):
                             agents = {**agents, "defaults": defaults}
                             data = {**data, "agents": agents}
                             break
+
+        # v2: nessun valore cambia. Il passo esiste perche' ``agents.defaults.atlas``
+        # e ``wiki.defaultWiki`` sono **chiavi ritirate** (``loader.RETIRED_KEY_PATHS``):
+        # il loader smette di conservarle, e alzare la versione fa riscrivere il
+        # file una volta all'avvio (``store.persist_schema_migrations``), cosi'
+        # cadono al primo boot e non alla prima impostazione che l'utente cambia.
+        if version < 2 and 2 not in _ANNOUNCED_MIGRATIONS:
+            _ANNOUNCED_MIGRATIONS.add(2)
+            logger.info(
+                "Config migration v2: retired keys are dropped on the next write "
+                "(agents.defaults.atlas, wiki.defaultWiki)"
+            )
         return data
 
     @model_validator(mode="after")
