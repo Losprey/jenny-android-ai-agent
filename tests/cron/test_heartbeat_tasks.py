@@ -836,6 +836,47 @@ class TestRecognisingAMarkerFromOutside:
         assert not is_only_markers(None)
 
 
+class TestTheRunTurnDeclaringItselfFine:
+    """Il turno che *delega* può anche dichiarare quel task a posto, e non conta.
+
+    Osservato sul Titan 2 alle 13:26 del 2026-09-03, quarto ciclo dopo
+    l'introduzione di ``nothing_to_report``: il turno del run ha chiamato il tool
+    con ``task=1`` **e poi** ha delegato lo stesso task 1. Le due cose si
+    contraddicono — un controllo appena affidato a un subagent non ha ancora una
+    risposta — ma oggi non fanno danno, perché il registratore del run non legge
+    affatto ``CHECK_OK``: il verdetto di un controllo delegato lo scrive il turno
+    d'annuncio (``record_followup_outcomes``), che il risultato ce l'ha in mano.
+
+    Questo test esiste per tenere ferma quella cecità. Chi un domani passasse
+    ``ok=`` anche a ``record_task_outcomes`` per simmetria chiuderebbe come sano,
+    nello stesso turno, un controllo che sta appena partendo — e la delega
+    sparirebbe dallo stato senza che nessuno abbia guardato il risultato.
+    """
+
+    def test_the_run_recorder_takes_no_ok_argument(self) -> None:
+        import inspect
+
+        assert "ok" not in inspect.signature(record_task_outcomes).parameters
+
+    def test_a_task_declared_fine_and_delegated_in_one_turn_stays_pending(self) -> None:
+        tasks = parse_heartbeat_tasks(
+            "## Active Tasks\n\n- controlla l'umidità\n- ricordami le vitamine\n"
+        )
+        state = CronJobState()
+
+        outcome = record_task_outcomes(
+            state,
+            tasks,
+            [],
+            now_ms=1_000,
+            escalating=[],
+            delegated=[CouldNotCheckMark("1", "letture umidità")],
+        )
+
+        assert [t.index for t in outcome.pending] == [1]
+        assert state.task_checks[tasks[0].id].pending_since_ms == 1_000
+
+
 class TestTheModelQuotingItsOwnInstructions:
     """Il preambolo rigurgitato non è un verdetto.
 
