@@ -24,6 +24,12 @@ from loguru import logger
 from jenny import __logo__, __version__
 from jenny.config.schema import Config
 
+# Id dei job di sistema che una versione precedente registrava e questa non
+# esegue piu'. ``build`` li ritira dallo store prima di registrare i vivi (v. il
+# commento sul posto e ``CronService.retire_system_job``). Per id e non per
+# nome: un promemoria dell'utente puo' chiamarsi come vuole.
+_RETIRED_SYSTEM_JOBS: tuple[str, ...] = ("atlas",)
+
 
 class GatewayContainer:
     """Costruisce e avvia il grafo del gateway; possiede lo stato di runtime."""
@@ -411,6 +417,15 @@ class GatewayContainer:
             heartbeat_cfg=hb_cfg,
             snapshot_before_dream=self._snapshot_before_dream,
         ).dispatch
+
+        # I lavoratori periodici che questa versione **non esegue piu'**. Il loro
+        # job e' ancora scritto nello store di chi aggiorna — e' cosi' che la
+        # registrazione sotto e' idempotente al riavvio — e senza il suo ramo nel
+        # dispatcher scatterebbe nel vuoto a ogni scadenza, per sempre. Si
+        # ritira per id, prima di registrare i vivi. Elenco chiuso: chi toglie un
+        # lavoratore aggiunge il suo id qui, e nessun altro punto lo conosce.
+        for retired in _RETIRED_SYSTEM_JOBS:
+            self.cron.retire_system_job(retired)
 
         # Register Dream system job (idempotent on restart).
         dream_cfg = config.agents.defaults.dream

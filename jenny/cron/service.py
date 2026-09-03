@@ -1268,6 +1268,43 @@ class CronService:
 
         return "not_found"
 
+    def retire_system_job(self, job_id: str) -> bool:
+        """Toglie un job di sistema che **questa versione non sa piu' eseguire**.
+
+        E' l'unica strada che passa sopra la protezione di :meth:`remove_job`, e
+        la protezione resta giusta per tutto il resto: un ``system_event`` non
+        e' dell'utente, e l'utente non deve poterlo cancellare da un tool. Ma un
+        lavoratore periodico ritirato dal codice lascia il suo job scritto nello
+        store — e' cosi' che ``register_system_job`` lo rende idempotente al
+        riavvio — e senza il suo ramo in ``_dispatch`` quel job cadrebbe ogni
+        volta su «unbound agent job», un warning e una ``CronJobSkippedError`` a
+        ogni scadenza, per sempre. Il chiamante e' uno solo,
+        ``GatewayContainer.build``, su un elenco chiuso di id; qui si ritira
+        **per id**, mai per nome, cosi' un promemoria dell'utente battezzato come
+        il vecchio lavoratore non c'entra.
+
+        Ritorna ``True`` se c'era qualcosa da togliere. I record di esecuzione
+        vanno via con lui, per la ragione scritta in :meth:`remove_job`.
+        """
+        store = self._load_store()
+        if store is None:
+            return False
+        before = len(store.jobs)
+        store.jobs = [j for j in store.jobs if j.id != job_id]
+        if len(store.jobs) == before:
+            return False
+        if self._running:
+            self._save_store()
+            self._arm_timer()
+        else:
+            self._append_action("del", {"job_id": job_id})
+        dropped = self._remove_run_records(job_id)
+        logger.info(
+            "Cron: retired system job {} — this version no longer runs it ({} run records)",
+            job_id, dropped,
+        )
+        return True
+
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""
         store = self._load_store()
