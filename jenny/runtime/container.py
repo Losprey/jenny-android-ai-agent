@@ -235,6 +235,12 @@ class GatewayContainer:
         try:
             sync_workspace_templates(self.config.workspace_path)
             self._migrate_wikis()
+            # Stessa promessa e stesso ``except`` della migrazione qui sopra: i
+            # file di un lavoratore ritirato vanno via al primo avvio della
+            # versione che l'ha tolto, o restano sul telefono per sempre.
+            from jenny.runtime.retired_artifacts import sweep_retired_artifacts
+
+            sweep_retired_artifacts(self.config.workspace_path)
             self.template_sync_error = None
         except Exception as exc:
             self.template_sync_error = exc
