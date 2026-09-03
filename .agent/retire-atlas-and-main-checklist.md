@@ -5,7 +5,7 @@ ragionamento sta la', qui c'e' solo cosa e' fatto. Si spunta quando e' **girato*
 per una garanzia che vive in un prompt «girato» include la calibrazione su due
 modelli in una sessione fresca.
 
-Ramo: `feat/retire-atlas-and-main`. Scritto il 03/09/2026. **Fatti lo stesso giorno: 0, A, D, B, C, E, F, G** (tranne G.5 e G.7, che vogliono una sessione fresca e un secondo modello) e H.2; H.1 aperta, H.3 gia' in mano all'utente. Un difetto trovato al primo avvio e chiuso: v. il piano, «Com'e' finita». Note sui passi:
+Ramo: `feat/retire-atlas-and-main`. Scritto il 03/09/2026. **Fatti lo stesso giorno: 0, A, D, B, C, E, F, G** (tranne G.5 e G.7, che vogliono una sessione fresca e un secondo modello) e H.2; H.1 fatta (PR #30), H.3 gia' in mano all'utente. Un difetto trovato al primo avvio e chiuso: v. il piano, «Com'e' finita». Note sui passi:
 
 - **A.4** misurata sul Mac: 0,25 ms (mediana) su 10 wiki e 400 pagine, 1.137 caratteri di blocco.
 - **D4.2** risolto: una chiave `atlas:` residua oggi cade su `user` per il fallthrough di sempre, non su `system` — ma dopo B non ne esiste piu' nessuna sorgente, e il test misura il bucket legacy, non la chiave.
@@ -13,6 +13,7 @@ Ramo: `feat/retire-atlas-and-main`. Scritto il 03/09/2026. **Fatti lo stesso gio
 - **B.10**: i quattro test di `_prune_sessions` di Atlas non sono stati portati sul giardiniere: il giardiniere ha gia' i suoi (T2.5, T1.4 in `test_gardener.py`); resta il caso «la potatura sgombera anche il quarto registro» con una chiave del giardiniere.
 - **G.3**: verificato via `/api/settings` (workers = gardener + compattazione), non dal pannello a schermo; il pannello token non riguardato.
 - **G.4**: «quali wiki hai?» su sessione calda ha risposto dalla cronologia (5 nomi); «copia il blocco» ha reso le 13 righe esatte, zero tool. E' la domanda giusta.
+- **G.9**: `/atlas` non e' piu' un comando: come ogni `/qualcosa` sconosciuto arriva al modello come testo, che risponde che non esiste (3,8 s, un turno). Non c'e' un «unknown command» testuale, e non c'era prima.
 - **G.8**: misurato sul Mac (A.4), non con un log DEBUG sul telefono.
 - **F.1**: oltre alle due occorrenze di D e ai loro test, la parola compare come **nome del file del piano** (`context.py`, `test_context_wikis.py`) e in tre frasi dei docs che dicono all'utente cosa e' stato ritirato (`memory.md`, `privacy.md`, `architecture.md`).
 
@@ -96,6 +97,6 @@ Ramo: `feat/retire-atlas-and-main`. Scritto il 03/09/2026. **Fatti lo stesso gio
 
 ## Passo H — chiusura
 
-- [ ] **H.1** PR su `main` con la descrizione che punta al piano; merge: lo decide l'utente
+- [x] **H.1** PR su `main` con la descrizione che punta al piano; merge: lo decide l'utente
 - [x] **H.2** «Com'e' finita» scritto nel piano: scarti da qui, misure di G, calibrazione (cosa e' diventato rosso togliendo ogni garanzia)
 - [ ] **H.3** Lo smontaggio dei **dati** di `main`: `roadmap/smontaggio-main.md`, con `## Wikis` a fare da cruscotto
