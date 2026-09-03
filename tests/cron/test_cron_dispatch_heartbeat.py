@@ -426,8 +426,16 @@ class TestThePreambleContract:
         # Le stesse frasi compaiono solo come divieto esplicito.
         assert "never send filler" in _HEARTBEAT_PREAMBLE.lower()
 
-    def test_it_names_the_message_tool_as_the_only_way_out(self) -> None:
+    def test_it_names_the_two_ways_out(self) -> None:
+        """Parlare e tacere sono entrambi un'azione, e il preambolo le nomina.
+
+        Finché il silenzio era "non chiamare niente", il modello lo codificava
+        come una ``message`` con dentro una parola qualunque: 14 bolle in chat
+        fra il 21/08 e il 3/09/2026. Il tool e il preambolo devono restare
+        allineati, o l'uscita torna a esistere solo nel codice.
+        """
         assert "`message` tool" in _HEARTBEAT_PREAMBLE
+        assert "`nothing_to_report`" in _HEARTBEAT_PREAMBLE
         assert "SILENT by default" in _HEARTBEAT_PREAMBLE
 
     def test_it_says_that_saying_nothing_is_correct(self) -> None:

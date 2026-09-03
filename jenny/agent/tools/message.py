@@ -69,6 +69,15 @@ def _unusable_silent_alert(content: str, *, has_media: bool) -> str | None:
     meta di :data:`_NOT_AN_ALERT` — e tutto il resto passa. Copre le cinque
     forme osservate; una sesta le sfuggirà, ed è il prezzo giusto.
 
+    **La sesta è arrivata, e cinque volte.** Fra il 26 agosto e il 3 settembre:
+    ``noop``, ``tutte le piante ok``, ``Silenzio: umidità ok.``, ``silent-skip``,
+    ``placeholder`` — nessuna intercettabile da una lista, tutte consegnate. La
+    denylist non è stata allargata, perché allargarla è la gara che non si vince:
+    è stata invece tolta di mezzo la causa. Un turno silenzioso ha ora
+    ``nothing_to_report``, cioè un'azione da compiere quando non c'è niente da
+    dire, e i tre rifiuti qui sotto la indicano. Prima chiedevano al modello di
+    *non fare* qualcosa — un'istruzione che, misurata, non è eseguibile.
+
     Rifiutare — invece di riscrivere il testo — è la forma giusta perché la
     quota del ciclo non viene consumata (``_sent_in_turn`` si alza solo su una
     consegna riuscita): il modello ha un altro tentativo, e la stringa di
@@ -84,7 +93,7 @@ def _unusable_silent_alert(content: str, *, has_media: bool) -> str | None:
         return (
             "Error: nothing was delivered — the message text was empty. "
             "A silent check reaches the user only with real user-facing text. "
-            "If there is nothing to report, send nothing and end the turn instead."
+            "If there is nothing to report, call `nothing_to_report` instead."
         )
     if is_only_markers(text):
         return (
@@ -92,13 +101,14 @@ def _unusable_silent_alert(content: str, *, has_media: bool) -> str | None:
             "CHECK_WARNED are not messages. Those lines belong in your answer text, "
             "which is where they are read and recorded; sending one here reaches the "
             "user with an internal marker and records nothing. Write the line in your "
-            "answer instead, and call this tool only with user-facing text."
+            "answer instead — or call `nothing_to_report`, which records the same "
+            "verdict as an action — and call this tool only with user-facing text."
         )
     if len(text) == 1 or text.casefold() in _NOT_AN_ALERT:
         return (
             f"Error: {text!r} was not delivered. A silent check sends an alert, and an "
             "alert is a sentence naming what happened and what the user should do. "
-            "Either write that text, or send nothing and end the turn."
+            "Either write that text, or call `nothing_to_report` instead."
         )
     return None
 

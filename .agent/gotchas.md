@@ -21,6 +21,19 @@ Android is the only supported runtime target. There is no shell, no pip, and no 
 
 Agent system prompts and scenario-specific instructions live in `jenny/templates/` as Jinja2 markdown files (`agent/identity.md`, `agent/platform_policy.md`, plus the workspace seeds `HEARTBEAT.md`, `SOUL.md`, `USER.md`, `AGENTS.md` at the top level). Changing these files alters agent behavior as directly as changing Python code. They are loaded by `utils/prompt_templates.py`.
 
+**Non chiedere a un turno silenzioso di *scrivere* qualcosa in chiusura.** Il preambolo
+dell'heartbeat ha detto per un'ora "call `nothing_to_report` … and close the turn with one
+short line", e il 2026-09-03 alle 11:25 il modello ha chiuso rigurgitando l'intero preambolo
+in coda alla risposta — 4.883 caratteri, con dentro i segnaposto `CHECK_FAILED <task number>:
+<one short line naming what stopped you>` e `CHECK_WARNED <task number>`. Il parser li ha
+letti come dichiarazioni: un controllo appena riuscito registrato come guasto **e** timbrato
+`escalated`, senza che un avviso sia mai partito. Il rigurgito del template è una patologia
+nota di questo modello (`strip_think` lo toglie da ciò che raggiunge l'utente dal 27/08); la
+difesa lato parser è `could_not_check._is_specimen`. La regola di prompt resta: la risposta
+finale di un turno silenzioso non la legge nessuno, quindi non chiederne una — ogni frase che
+invita a "chiudere con una riga" è un invito a copiare la riga più vicina, e le righe più
+vicine sono i tuoi segnaposto.
+
 Tool descriptions, skills, and replayed session history also shape model behavior. Treat changes to those surfaces like runtime code: keep them narrow, add a focused regression test when possible, and avoid teaching the model to repeat internal markers, local paths, or tool-call text.
 
 ## Context Pollution Persists

@@ -73,6 +73,7 @@ _HARDCODED_TOOL_MODULES = [
     "memory_recall",
     "search",
     "message",
+    "nothing_to_report",
     "apply_patch",
     "exec_session",
     "introspect",

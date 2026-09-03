@@ -11,6 +11,21 @@ modello debba imparare, non può raggiungere l'utente per sbaglio, e non costa
 una chiamata LLM in più. Un tool dedicato sarebbe invece comparso nell'elenco di
 OGNI turno, chat comprese: il registry di un turno cron è quello di default.
 
+**Quel prezzo è stato poi pagato, per un caso solo, e vale sapere quale.**
+``nothing_to_report`` (``agent/tools/nothing_to_report.py``) è un tool dedicato,
+sta davvero nell'elenco di ogni turno, e il paragrafo qui sopra resta vero: il
+suo schema pesa 757 caratteri — ~190 token su ogni richiesta, chat comprese, il
+3,8% del payload dei tool. Ciò che è cambiato è la misura dall'altra parte. I
+marcatori qui descrivono *che cosa* dichiarare, e per quello il testo finale
+basta; non risolvono il
+problema opposto, cioè che su un turno silenzioso **tacere non è un'azione**, e
+un modello piccolo l'assenza di azione la codifica come ``message`` con dentro
+una parola qualunque. Quattordici bolle di riempimento arrivate in chat fra il 21
+agosto e il 3 settembre 2026, cinque dopo il guardiano in
+``message.py::_unusable_silent_alert``. Il tool non sostituisce i marcatori: ne
+scrive uno (``CHECK_OK <n>``, e solo se il numero è esplicito) come effetto di
+un'azione che il modello può compiere.
+
 Da non confondere col sentinella rifiutato in ``AgentLoop._process_message``: là
 si decideva **se consegnare**, cioè un atto con un effetto sull'utente, e per
 quello il tool ``message`` è e resta l'unica strada. Qui il modello non consegna
@@ -26,6 +41,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from loguru import logger
 
 # La parola che apre la riga. Maiuscola e senza spazi: è un token, non prosa.
 COULD_NOT_CHECK_MARKER = "CHECK_FAILED"
@@ -205,6 +222,36 @@ def is_only_markers(text: str | None) -> bool:
     return bool(lines) and all(line.startswith(_ALL_MARKERS) for line in lines)
 
 
+def _is_specimen(head: str) -> bool:
+    """La riga è il *modello* della riga, non una riga scritta.
+
+    Misurato sul Titan 2 il 2026-09-03 alle 11:25, e non è un caso di scuola: il
+    modello ha scritto la sua riga vera e poi ha rigurgitato **l'intero
+    preambolo** in coda alla risposta — 4.883 caratteri, con dentro
+    ``CHECK_FAILED <task number>: <one short line naming what stopped you>`` e
+    ``CHECK_WARNED <task number>``. Il parser li ha letti come dichiarazioni, e
+    un controllo perfettamente sano è finito registrato come guasto **e** come
+    già segnalato all'utente (``escalated``), senza che nessun avviso sia mai
+    partito: esattamente lo stato "controllo morto in silenzio" che tutto questo
+    modulo esiste per impedire.
+
+    Il rigurgito del template è una patologia nota di questo modello — c'è già
+    ``strip_think`` a toglierlo da ciò che raggiunge l'**utente** (v. il commit
+    del 2026-08-27), e non c'era niente a toglierlo da ciò che raggiunge il
+    *parser*. Qui la difesa è precisa e non euristica: un segnaposto comincia per
+    ``<``, e una riga scritta da qualcuno non lo fa mai.
+
+    La direzione d'errore è quella giusta anche nel caso limite in cui un motivo
+    vero cominciasse per ``<``. Il generale "nel dubbio è ``CHECK_FAILED``" vale
+    fra due letture di un'osservazione ambigua; qui l'osservazione non è ambigua,
+    ed è il ramo opposto a costare di più: un guasto inventato si porta dietro un
+    ``CHECK_WARNED`` inventato, che zittisce gli avvisi veri di quel controllo
+    finché qualcuno non se ne accorge. Un guasto vero perso, invece, si ripresenta
+    al ciclo dopo.
+    """
+    return head.startswith("<")
+
+
 def _parse_marks(final_text: str | None, marker: str) -> list[CouldNotCheckMark]:
     """Corpo condiviso dai quattro marcatori. Nessuno è prefisso di un altro."""
     marks: list[CouldNotCheckMark] = []
@@ -214,6 +261,9 @@ def _parse_marks(final_text: str | None, marker: str) -> list[CouldNotCheckMark]
             continue
         rest = stripped[len(marker):].rstrip(_MARKER_DECORATION)
         head = rest.lstrip()
+        if _is_specimen(head.lstrip(_SEPARATORS).lstrip()) or _is_specimen(head):
+            logger.debug("Marker specimen echoed back, not a declaration: {!r}", stripped[:80])
+            continue
         if head[:1] and head[0] in _SEPARATORS:
             # Forma B8: ``CHECK_FAILED: motivo``. Il motivo può contenere due
             # punti a sua volta, quindi qui non si va a cercare un separatore —

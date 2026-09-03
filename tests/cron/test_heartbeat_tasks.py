@@ -18,6 +18,7 @@ from jenny.cron.could_not_check import (
     parse_could_not_check_marks,
     parse_delegated_marks,
     parse_ok_marks,
+    parse_warned_marks,
 )
 from jenny.cron.heartbeat_tasks import (
     HeartbeatTask,
@@ -833,6 +834,90 @@ class TestRecognisingAMarkerFromOutside:
         assert not is_only_markers("")
         assert not is_only_markers("   \n  ")
         assert not is_only_markers(None)
+
+
+class TestTheRunTurnDeclaringItselfFine:
+    """Il turno che *delega* può anche dichiarare quel task a posto, e non conta.
+
+    Osservato sul Titan 2 alle 13:26 del 2026-09-03, quarto ciclo dopo
+    l'introduzione di ``nothing_to_report``: il turno del run ha chiamato il tool
+    con ``task=1`` **e poi** ha delegato lo stesso task 1. Le due cose si
+    contraddicono — un controllo appena affidato a un subagent non ha ancora una
+    risposta — ma oggi non fanno danno, perché il registratore del run non legge
+    affatto ``CHECK_OK``: il verdetto di un controllo delegato lo scrive il turno
+    d'annuncio (``record_followup_outcomes``), che il risultato ce l'ha in mano.
+
+    Questo test esiste per tenere ferma quella cecità. Chi un domani passasse
+    ``ok=`` anche a ``record_task_outcomes`` per simmetria chiuderebbe come sano,
+    nello stesso turno, un controllo che sta appena partendo — e la delega
+    sparirebbe dallo stato senza che nessuno abbia guardato il risultato.
+    """
+
+    def test_the_run_recorder_takes_no_ok_argument(self) -> None:
+        import inspect
+
+        assert "ok" not in inspect.signature(record_task_outcomes).parameters
+
+    def test_a_task_declared_fine_and_delegated_in_one_turn_stays_pending(self) -> None:
+        tasks = parse_heartbeat_tasks(
+            "## Active Tasks\n\n- controlla l'umidità\n- ricordami le vitamine\n"
+        )
+        state = CronJobState()
+
+        outcome = record_task_outcomes(
+            state,
+            tasks,
+            [],
+            now_ms=1_000,
+            escalating=[],
+            delegated=[CouldNotCheckMark("1", "letture umidità")],
+        )
+
+        assert [t.index for t in outcome.pending] == [1]
+        assert state.task_checks[tasks[0].id].pending_since_ms == 1_000
+
+
+class TestTheModelQuotingItsOwnInstructions:
+    """Il preambolo rigurgitato non è un verdetto.
+
+    Misurato sul Titan 2 il 2026-09-03 alle 11:25: il modello ha scritto la sua
+    riga vera e poi ha riversato in coda l'intero preambolo — 4.883 caratteri,
+    segnaposto compresi. Il parser li ha letti come dichiarazioni e un controllo
+    sano è finito registrato come guasto **e** come già segnalato all'utente,
+    senza che nessun avviso sia partito. È lo stato "controllo morto in
+    silenzio", prodotto da un controllo che stava benissimo.
+    """
+
+    # Le tre righe esatte lette dal dispositivo, verbatim.
+    ECHOED = (
+        "CHECK_DELEGATED 1: reading all plants' soil humidity via the waterbot skill\n"
+        "\n"
+        "[This is a scheduled background check. It is SILENT by default: whatever you "
+        "write as your answer is NOT delivered to the user and nobody reads it.\n"
+        "CHECK_FAILED <task number>: <one short line naming what stopped you>\n"
+        "CHECK_WARNED <task number>\n"
+        "CHECK_DELEGATED <task number>: <what you asked the subagent for>\n"
+    )
+
+    def test_an_echoed_failure_specimen_is_not_a_failure(self) -> None:
+        assert parse_could_not_check_marks(self.ECHOED) == []
+
+    def test_an_echoed_warning_specimen_does_not_stamp_the_alert(self) -> None:
+        """Il peggiore dei tre: ``escalated`` zittisce gli avvisi veri di quel
+        controllo, e nessuno se ne accorge finché non serve."""
+        assert parse_warned_marks(self.ECHOED) == []
+
+    def test_the_real_line_in_the_same_answer_still_counts(self) -> None:
+        """Non si butta via la risposta: si buttano via i segnaposto."""
+        marks = parse_delegated_marks(self.ECHOED)
+        assert [m.ref for m in marks] == ["1"]
+
+    def test_a_specimen_in_the_reason_position_is_read_too(self) -> None:
+        assert parse_could_not_check_marks("CHECK_FAILED: <reason>") == []
+
+    def test_a_real_reason_is_never_mistaken_for_one(self) -> None:
+        marks = parse_could_not_check_marks("CHECK_FAILED 2: hps unreachable")
+        assert [(m.ref, m.reason) for m in marks] == [("2", "hps unreachable")]
 
 
 class TestThePositiveMarker:

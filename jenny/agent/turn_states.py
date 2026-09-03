@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from jenny.agent.tools.message import MessageTool
+from jenny.agent.tools.nothing_to_report import NothingToReportTool
 from jenny.agent.turn_types import TurnState
 from jenny.bus.progress import build_silent_progress_callback
 from jenny.command import CommandContext
@@ -233,8 +234,9 @@ class StateHandlersMixin:
         """Prelude di tooling condiviso da BUILD (FSM) e dal path di sistema.
 
         Sincronizza i tool delle app (prima che il runner legga le definizioni),
-        imposta il contesto tool e azzera lo stato per-turno del ``MessageTool``.
-        Vive in un unico posto così i due path non possono divergere.
+        imposta il contesto tool e azzera lo stato per-turno dei due tool che ne
+        hanno uno — ``message`` e ``nothing_to_report``. Vive in un unico posto
+        così i due path non possono divergere.
         """
         await self._sync_apps_and_notify()
         self._set_tool_context(
@@ -242,6 +244,9 @@ class StateHandlersMixin:
         )
         if (message_tool := self.tools.get("message")) and isinstance(message_tool, MessageTool):
             message_tool.start_turn()
+        abstain_tool = self.tools.get("nothing_to_report")
+        if isinstance(abstain_tool, NothingToReportTool):
+            abstain_tool.start_turn()
 
     def _finalize_turn_save(
         self,
