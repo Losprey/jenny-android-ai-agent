@@ -1,7 +1,7 @@
 """Un rifiuto di budget deve fermare il commit del run, anche se il run ha scritto altro.
 
 La regola di commit dei run interni (``MemoryStore.internal_run_should_commit``,
-condivisa da Dream e Atlas) guardava un solo contatore per run: ``writes_ok > 0``.
+condivisa da Dream e dal giardiniere) guardava un solo contatore per run: ``writes_ok > 0``.
 Ma i contatori sono *per run*, non per file. Un run di Dream che scrive con
 successo una skill e si vede rifiutare da budget la scrittura su ``MEMORY.md``
 aveva quindi ``writes_ok == 1``: il cursore avanzava, e il fatto che non è mai
@@ -219,7 +219,7 @@ class TestRecoveringInTheSameTurnCommits:
 
 
 class TestRefusalCounterTolerance:
-    """La regola resta tollerante a registry che non sono quelli di Dream/Atlas."""
+    """La regola resta tollerante a registry che non sono quelli di Dream e del giardiniere."""
 
     def test_a_registry_without_the_refusal_counter_still_decides(self) -> None:
         """Senza ``writes_refused_budget`` si legge come zero, non come rifiuto.

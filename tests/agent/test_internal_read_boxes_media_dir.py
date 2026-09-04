@@ -1,9 +1,9 @@
-"""``<workspace>/.jenny/media`` e le cassette di lettura di Dream e Atlas (T9.10).
+"""``<workspace>/.jenny/media`` e la cassetta di lettura di Dream (T9.10).
 
 T9.2 ha spento la media dir nella cassetta del **giardiniere**, e il passo dopo
-chiedeva di guardare le due che hanno «la forma identica». Non l'hanno: la radice
-di lettura del giardiniere è **un progetto** (``wikis/<nome>``), quella di Dream e
-di Atlas è il **workspace intero** — e la media dir sta dentro il workspace.
+chiedeva di guardare quella che ha «la forma identica». Non l'ha: la radice
+di lettura del giardiniere è **un progetto** (``wikis/<nome>``), quella di Dream
+è il **workspace intero** — e la media dir sta dentro il workspace.
 Quindi lì il flag ``read_media_dir`` non ha niente da allargare: è inerte, e
 metterlo a ``False`` sarebbe un placebo — una riga che *sembra* un confine e non
 ne mette nessuno.
@@ -11,8 +11,8 @@ ne mette nessuno.
 Questi test fissano le due metà di quella decisione, entrambe misurate passando
 per i tool veri:
 
-1. le due cassette **raggiungono** quella cartella, e ci arrivano perché è dentro
-   la loro radice di lettura;
+1. la cassetta **raggiunge** quella cartella, e ci arriva perché è dentro la sua
+   radice di lettura;
 2. spegnere il flag su una cassetta con quella radice **non cambia la risposta**.
 
 La seconda è quella che serve al prossimo che legge T9.10 e vuole «chiuderla per
@@ -34,7 +34,6 @@ from pathlib import Path
 
 import pytest
 
-from jenny.agent.atlas import AtlasStore
 from jenny.agent.memory import MemoryStore
 from jenny.config.paths import get_media_dir, get_workspace_path
 from jenny.security.workspace_access import (
@@ -86,26 +85,6 @@ async def test_dreams_read_box_reaches_the_media_dir(media_note: Path) -> None:
     assert _SECRET in out, out
 
 
-@pytest.mark.parametrize("tool,call", [
-    ("read_file", {"path": ".jenny/media/segreto-t910.md"}),
-    ("list_dir", {"path": ".jenny/media"}),
-    ("grep", {"pattern": "personale", "path": ".jenny/media"}),
-    ("find_files", {"pattern": "*.md", "path": ".jenny/media"}),
-])
-async def test_atlas_read_box_reaches_the_media_dir(
-    media_note: Path, tool: str, call: dict
-) -> None:
-    """Atlas legge tutta l'installazione **di proposito** (lo dice la sua docstring),
-    quindi la media dir è dentro la superficie dichiarata del run e non un
-    allargamento: qui si fissa che ci sta, con tutti e quattro i tool."""
-    tools = AtlasStore(get_workspace_path()).build_tools()
-
-    out = await tools.get(tool).execute(**call)
-
-    assert "outside allowed directory" not in out, out
-    assert "segreto-t910.md" in out or _SECRET in out, out
-
-
 def _with_the_flag_off(tool):
     """Il flag spento **sulla cassetta vera**, e non su una ricostruita a mano.
 
@@ -130,21 +109,3 @@ async def test_the_flag_is_inert_in_dreams_box(media_note: Path) -> None:
     )
 
     assert _SECRET in out, out
-
-
-@pytest.mark.parametrize("tool,call", [
-    ("read_file", {"path": ".jenny/media/segreto-t910.md"}),
-    ("list_dir", {"path": ".jenny/media"}),
-    ("grep", {"pattern": "personale", "path": ".jenny/media"}),
-    ("find_files", {"pattern": "*.md", "path": ".jenny/media"}),
-])
-async def test_the_flag_is_inert_in_atlas_box(
-    media_note: Path, tool: str, call: dict
-) -> None:
-    """Lo stesso per tutti e quattro i tool di lettura di Atlas."""
-    tools = AtlasStore(get_workspace_path()).build_tools()
-
-    out = await _with_the_flag_off(tools.get(tool)).execute(**call)
-
-    assert "outside allowed directory" not in out, out
-    assert "segreto-t910.md" in out or _SECRET in out, out

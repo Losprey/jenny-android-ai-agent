@@ -55,10 +55,10 @@ def _reminder() -> CronJob:
     )
 
 
-def _atlas_job() -> CronJob:
+def _dream_job() -> CronJob:
     return CronJob(
-        id="atlas",
-        name="atlas",
+        id="dream",
+        name="dream",
         schedule=CronSchedule(kind="every", every_ms=6 * _HOUR_MS),
         payload=CronPayload(kind="system_event"),
     )
@@ -77,7 +77,7 @@ def _with_reminder_in_the_backup(path: Path) -> CronService:
     non solo da un file danneggiato.
     """
     service = CronService(path)
-    service.register_system_job(_atlas_job())
+    service.register_system_job(_dream_job())
     assert service._store is not None
     service._store.jobs.append(_reminder())
     service._save_store()
@@ -90,7 +90,7 @@ def test_healthy_store_records_no_recovery(tmp_path) -> None:
     path = tmp_path / "cron" / "jobs.json"
 
     service = CronService(path)
-    service.register_system_job(_atlas_job())
+    service.register_system_job(_dream_job())
 
     assert CronService(path).list_jobs()
     assert get_runtime_context().cron_recovered_from is None
@@ -107,7 +107,7 @@ def test_corrupt_store_recovers_the_reminders_from_the_backup(tmp_path) -> None:
     reloaded = CronService(path)
     ids = {j.id for j in reloaded.list_jobs()}
 
-    assert ids == {"atlas", "pillola"}
+    assert ids == {"dream", "pillola"}
     ctx = get_runtime_context()
     assert ctx.cron_recovered_from == "backup"
     assert ctx.cron_quarantine_path is not None
@@ -130,9 +130,9 @@ def test_corrupt_store_without_backup_starts_empty_and_says_so(tmp_path) -> None
     path.write_text(_BROKEN, encoding="utf-8")
 
     service = CronService(path)
-    service.register_system_job(_atlas_job())
+    service.register_system_job(_dream_job())
 
-    assert [j.id for j in service.list_jobs()] == ["atlas"]
+    assert [j.id for j in service.list_jobs()] == ["dream"]
     ctx = get_runtime_context()
     assert ctx.cron_recovered_from == "empty"
     assert ctx.cron_quarantine_path is not None
@@ -147,9 +147,9 @@ def test_unusable_backup_falls_through_to_empty(tmp_path) -> None:
     _backup_of(path).write_text(_BROKEN, encoding="utf-8")
 
     service = CronService(path)
-    service.register_system_job(_atlas_job())
+    service.register_system_job(_dream_job())
 
-    assert [j.id for j in service.list_jobs()] == ["atlas"]
+    assert [j.id for j in service.list_jobs()] == ["dream"]
     assert get_runtime_context().cron_recovered_from == "empty"
 
 
@@ -167,7 +167,7 @@ def test_corruption_after_a_good_start_warns_nobody(tmp_path) -> None:
     path.write_text(_BROKEN, encoding="utf-8")
     jobs = service.list_jobs()
 
-    assert {j.id for j in jobs} == {"atlas", "pillola"}
+    assert {j.id for j in jobs} == {"dream", "pillola"}
     assert get_runtime_context().cron_recovered_from is None
 
 
@@ -193,7 +193,7 @@ def test_refuses_to_start_only_when_the_broken_file_cannot_be_set_aside(
     service = CronService(path)
 
     with pytest.raises(RuntimeError, match="could not be set aside"):
-        service.register_system_job(_atlas_job())
+        service.register_system_job(_dream_job())
 
     # E il file rotto è ancora lì, intatto: nessuno ci ha scritto sopra.
     assert path.read_text(encoding="utf-8") == _BROKEN

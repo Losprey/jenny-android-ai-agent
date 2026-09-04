@@ -121,9 +121,6 @@ _PAYLOAD = """{
     "review_state": {"runs_since_review": 3, "stuck_runs": 0, "nothing_new_runs": 0}
   },
   "workers": {
-    "atlas": {"enabled": true, "schedule": "every 6h",
-              "interval_h": {"value": 6, "min": 1, "max": null},
-              "max_context_tokens": {"value": 1200, "min": 100, "max": null}},
     "gardener": {"enabled": true, "schedule": "every 30min",
                  "interval_min": {"value": 30, "min": 1, "max": 1440},
                  "idle_min": {"value": 30, "min": 0, "max": 1440},

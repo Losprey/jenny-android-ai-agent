@@ -481,7 +481,7 @@ def test_an_exotic_separator_does_not_invent_an_entry(tmp_path) -> None:
 
 def test_the_cap_takes_what_it_can_and_says_what_it_left(tmp_path) -> None:
     """Mai troncare zitti: il numero di voci rimaste è un dato che il chiamante
-    deve poter mettere nel prompt. È la lezione già scritta in Atlas e nel tetto
+    deve poter mettere nel prompt. È la lezione già scritta nel tetto
     della mappa (T3)."""
     project = _project(tmp_path)
     _journal(project, "20260822", *[f"fatto {i}" for i in range(10)])
@@ -566,8 +566,8 @@ def test_the_state_round_trips(tmp_path) -> None:
 
 
 def test_the_state_lives_in_the_hidden_folder(tmp_path) -> None:
-    """Sotto ``.jenny/``, cioè fuori dall'impronta di Atlas, fuori dalle viste e
-    fuori dalla rubrica — senza che nessuno di quei tre debba imparare niente. Il
+    """Sotto ``.jenny/``, cioè fuori dalle viste e
+    fuori dal prompt — senza che nessuno di quei tre debba imparare niente. Il
     quaderno è materiale umano, il cursore è macchinario."""
     project = _project(tmp_path)
     write_state(project, GardenerState())

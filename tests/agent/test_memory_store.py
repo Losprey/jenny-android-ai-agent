@@ -44,7 +44,7 @@ class TestMemoryStoreCore:
           momento dell'iniezione non ha nessuno dietro: non distingue l'identità
           da una nota stantia, taglia quel che capita in coda, e lo fa a ogni
           turno senza dirlo a nessuno che possa rimediare.
-        - La rubrica di Atlas è un **indice**: quel che il tetto le toglie è un
+        - L'elenco delle wiki è un **indice**: quel che il tetto le toglie è un
           link, e la pagina resta a un ``read_file`` di distanza. La coda di
           ``MEMORY.md`` non è scritta in nessun altro posto, quindi un avviso
           "il resto è là" non avrebbe dove puntare.

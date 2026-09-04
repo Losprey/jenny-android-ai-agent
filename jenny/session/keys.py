@@ -7,7 +7,6 @@ import re
 from loguru import logger
 
 __all__ = [
-    "ATLAS_SESSION_PREFIX",
     "CRON_SESSION_PREFIX",
     "DREAM_SESSION_PREFIX",
     "GARDENER_SESSION_PREFIX",
@@ -79,9 +78,6 @@ DREAM_SESSION_PREFIX = "dream:"
 # il cursore.
 GARDENER_SESSION_PREFIX = "gardener:"
 
-# Prefisso dei run di Atlas (``atlas:<timestamp>``, v. ``agent/atlas``).
-ATLAS_SESSION_PREFIX = "atlas:"
-
 # Prefisso del turno interno generico (``internal:direct``): e' il default di
 # ``AgentLoop.process_direct``, che oggi nessun chiamante di produzione lascia
 # scoperto — tutti passano una chiave esplicita.
@@ -104,7 +100,6 @@ _INTERNAL_KIND_BY_PREFIX: tuple[tuple[str, str], ...] = (
     (SUBAGENT_SESSION_PREFIX, "subagent"),
     (CRON_SESSION_PREFIX, "cron"),
     (DREAM_SESSION_PREFIX, "dream"),
-    (ATLAS_SESSION_PREFIX, "atlas"),
     (GARDENER_SESSION_PREFIX, "gardener"),
     (INTERNAL_SESSION_PREFIX, "internal"),
 )
@@ -160,7 +155,7 @@ def internal_session_kind(key: str) -> str | None:
     """Il *kind* di lavoro interno a cui appartiene la session key, o ``None``.
 
     Ritorna una delle etichette del vocabolario (``"subagent"``, ``"cron"``,
-    ``"dream"``, ``"atlas"``, ``"internal"``, ``"heartbeat"``) quando la chiave
+    ``"dream"``, ``"gardener"``, ``"internal"``, ``"heartbeat"``) quando la chiave
     e' di una sessione interna, ``None`` quando e' una conversazione utente.
 
     Serve a chi non ha bisogno solo del si/no di
@@ -183,7 +178,7 @@ def session_kind(key: str) -> str:
     categorie non sono una tassonomia per bellezza: rispondono a domande diverse
     e vengono trattate diversamente da chi tiene la memoria.
 
-    - ``internal`` — lavoro del sistema (cron, Dream, Atlas, subagent,
+    - ``internal`` — lavoro del sistema (cron, Dream, il giardiniere, subagent,
       heartbeat). Non e' conversazione, non compare negli elenchi user-facing, e
       rilegge le *proprie* voci in coda di lavoro perche' e' cosi che un job si
       ricorda dei suoi run passati.

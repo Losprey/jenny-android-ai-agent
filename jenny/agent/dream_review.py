@@ -9,7 +9,7 @@ in modo monotono.
 
 Questo modulo è il secondo tipo di run: nessuna storia nel prompt, nessun fatto
 da instradare, un solo mestiere — far rientrare i file nel budget. La forma è
-quella di :mod:`jenny.agent.atlas`: tutta la logica qui, al dispatcher cron
+quella del giardiniere: tutta la logica qui, al dispatcher cron
 restano l'instradamento e il log.
 
 Tre cose che questo run **non** fa, ognuna con il suo test in
@@ -51,7 +51,7 @@ from jenny.utils.prompt_templates import render_template
 if TYPE_CHECKING:
     from jenny.agent.memory_budget import FileBudget, WriteSizeGuard
 
-# Valori di ``ReviewOutcome.status``. Stringhe come in ``AtlasOutcome`` e non
+# Valori di ``ReviewOutcome.status``. Stringhe come in ``GardenerOutcome`` e non
 # enum: finiscono nei log e nelle asserzioni dei test, e un enum qui
 # obbligherebbe ogni chiamante a importare questo modulo solo per confrontare.
 STATUS_COMPLETED = "completed"
@@ -140,7 +140,7 @@ async def _silent(*_args: Any, **_kwargs: Any) -> None:
 
 
 def _timezone_of(agent: Any) -> str | None:
-    """Fuso dell'agente, per datare la riga di consumo token. Come in ``atlas``."""
+    """Fuso dell'agente, per datare la riga di consumo token. Come nel giardiniere."""
     context = getattr(agent, "context", None)
     return getattr(context, "timezone", None)
 

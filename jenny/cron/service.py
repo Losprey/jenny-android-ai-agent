@@ -499,8 +499,16 @@ class CronService:
             jobs_map[j.id] = j
 
         def _del(params: dict):
+            # Cancellare un job che non c'e' piu' e' un no-op, non un errore: il
+            # giornale si rilegge a **ogni** caricamento finche' il servizio non
+            # parte, e nel frattempo ``register_system_job`` salva lo store senza
+            # quel job. Con ``pop(job_id)`` secco la riga sollevava a ogni giro,
+            # il ``continue`` sotto saltava ``changed = True``, e il giornale non
+            # veniva mai svuotato: un traceback per ogni ``_load_store``, per
+            # sempre (misurato sul telefono il 03/09/2026, primo avvio della
+            # 0.10.0, con la riga «del atlas» del ritiro).
             if job_id := params.get("job_id"):
-                jobs_map.pop(job_id)
+                jobs_map.pop(job_id, None)
 
         with self._lock:
             with open(self._action_path, "r", encoding="utf-8") as f:
@@ -803,7 +811,7 @@ class CronService:
             # Solo ``every`` è relativo, quindi solo ``every`` poteva perdersi
             # qui: ricalcolarlo a ogni avvio significava "N ore di uptime
             # ininterrotto", non "ogni N ore". Su Android, dove il processo
-            # viene ucciso e rilanciato, una scadenza lunga (Atlas, 12h) non
+            # viene ucciso e rilanciato, una scadenza lunga (sei o dodici ore) non
             # arrivava mai. Conservare quella salvata fa sì che il conto non
             # arretri mai e che una scadenza mancata a app spenta venga
             # recuperata al primo tick.
@@ -1205,7 +1213,7 @@ class CronService:
         # Il conto alla rovescia sopravvive al riavvio. Ricalcolarlo qui a ogni
         # avvio rendeva "ogni N ore" un sinonimo di "dopo N ore di uptime
         # ininterrotto": su un telefono, dove il servizio viene ucciso e
-        # rilanciato, un job lungo come Atlas (12h) poteva non scattare mai,
+        # rilanciato, un job lungo dodici ore poteva non scattare mai,
         # perché ogni ripartenza spostava la scadenza di altre 12 ore.
         # Conservando lo stato la scadenza non arretra mai, quindi il job
         # arriva a scattare anche a colpi di sessioni brevi; se è gia passata
@@ -1267,6 +1275,45 @@ class CronService:
             return "removed"
 
         return "not_found"
+
+    def retire_system_job(self, job_id: str) -> bool:
+        """Toglie un job di sistema che **questa versione non sa piu' eseguire**.
+
+        E' l'unica strada che passa sopra la protezione di :meth:`remove_job`, e
+        la protezione resta giusta per tutto il resto: un ``system_event`` non
+        e' dell'utente, e l'utente non deve poterlo cancellare da un tool. Ma un
+        lavoratore periodico ritirato dal codice lascia il suo job scritto nello
+        store — e' cosi' che ``register_system_job`` lo rende idempotente al
+        riavvio — e senza il suo ramo in ``_dispatch`` quel job cadrebbe ogni
+        volta su «unbound agent job», un warning e una ``CronJobSkippedError`` a
+        ogni scadenza, per sempre. Il chiamante e' uno solo,
+        ``GatewayContainer.build``, su un elenco chiuso di id; qui si ritira
+        **per id**, mai per nome, cosi' un promemoria dell'utente battezzato come
+        il vecchio lavoratore non c'entra.
+
+        Ritorna ``True`` se c'era qualcosa da togliere. I record di esecuzione
+        vanno via con lui, per la ragione scritta in :meth:`remove_job`.
+        """
+        store = self._load_store()
+        if store is None:
+            return False
+        before = len(store.jobs)
+        store.jobs = [j for j in store.jobs if j.id != job_id]
+        if len(store.jobs) == before:
+            return False
+        # Salva direttamente, come ``register_system_job`` che gira nella stessa
+        # fase (``GatewayContainer.build``, prima di ``start``): passare dal
+        # giornale delle azioni lascerebbe una riga «del» che il primo
+        # ``_save_store`` della registrazione rende gia' vecchia.
+        self._save_store()
+        if self._running:
+            self._arm_timer()
+        dropped = self._remove_run_records(job_id)
+        logger.info(
+            "Cron: retired system job {} — this version no longer runs it ({} run records)",
+            job_id, dropped,
+        )
+        return True
 
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""

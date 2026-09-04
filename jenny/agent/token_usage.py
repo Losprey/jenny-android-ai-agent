@@ -33,6 +33,12 @@ _USAGE_KEYS = (
     "estimated_tokens",
 )
 _REQUEST_KEYS = ("requests", "provider_requests", "estimated_requests")
+# ``"atlas"`` e' un bucket **legacy**: il lavoratore che ci spendeva non esiste
+# piu' e niente puo' piu' finirci (non e' in ``_INTERNAL_KIND_TO_SOURCE``), ma i
+# giorni gia' scritti in ``token-usage.json`` lo portano. Toglierlo da qui li
+# farebbe ripiegare su ``"system"`` alla prossima lettura (``_clean_source``),
+# cioe' cambierebbe etichetta a una spesa passata: un registro e' l'unico posto
+# dove la storia deve restare com'era.
 _SOURCE_KEYS = ("user", "api", "cron", "dream", "atlas", "gardener", "system")
 # Mappa *locale* kind interno -> bucket di ``_SOURCE_KEYS``. Il vocabolario dei
 # kind e' condiviso (``jenny.session.keys.internal_session_kind``), la
@@ -41,7 +47,6 @@ _SOURCE_KEYS = ("user", "api", "cron", "dream", "atlas", "gardener", "system")
 # fallthrough — come prima di questa condivisione.
 _INTERNAL_KIND_TO_SOURCE = {
     "dream": "dream",
-    "atlas": "atlas",
     "cron": "cron",
     "heartbeat": "cron",
     # Un bucket suo e non ``cron``, benche' sia il cron a farlo partire: il
@@ -359,7 +364,7 @@ class TokenUsageHook(AgentHook):
         """Misurare non e' parlare: v. ``AgentHook.runs_when_ephemeral``.
 
         E' l'unico hook che lo dichiara, e la ragione e' che il lavoro effimero —
-        Dream, Atlas, la revisione, il giardiniere — e' esattamente quello che
+        Dream, la revisione, il giardiniere — e' esattamente quello che
         l'utente non ha chiesto e non vede arrivare, cioe' quello che conviene
         misurare di piu'.
         """

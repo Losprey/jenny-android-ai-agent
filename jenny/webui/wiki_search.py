@@ -260,10 +260,8 @@ def pack_index(index: SearchIndex, version: str) -> dict[str, Any]:
 def fingerprint(pages_dir: Path) -> str:
     """Impronta del contenuto di una wiki, calcolata senza leggere i file.
 
-    ``(rel, mtime_ns, size)`` per ogni pagina che finirebbe nel grafo. È la
-    stessa domanda che si fa :func:`jenny.utils.wiki_paths.wiki_fingerprint`,
-    ma su un insieme diverso — quello del grafo, non quello di Atlas — e per un
-    consumatore diverso, quindi non è la stessa funzione.
+    ``(rel, mtime_ns, size)`` per ogni pagina che finirebbe nel grafo: un'impronta
+    dell'insieme del grafo, per il solo consumatore della ricerca.
     """
     digest = hashlib.sha256()
     for rel, path in iter_page_files(pages_dir):

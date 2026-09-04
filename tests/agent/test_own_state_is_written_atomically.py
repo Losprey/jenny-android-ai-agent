@@ -25,7 +25,7 @@ la sorgente non ha alcun effetto e l'assert fallirebbe su codice corretto. È an
 la convenzione del resto della suite.
 
 Complementare a ``tests/agent/tools/test_own_state_atomic_write.py`` (T1.5), che
-copre il *review pass* — SOUL.md / USER.md / MEMORY.md / WIKI.md riscritti con
+copre il *review pass* — SOUL.md / USER.md / MEMORY.md riscritti con
 ``edit_file`` e ``apply_patch``. Nessuna sovrapposizione: quello guarda i tool
 file dal binding di ``filesystem.py``, questo guarda i tre siti che scrivono per
 conto proprio. Restano due moduli perché stanno su due livelli diversi del

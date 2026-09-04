@@ -13,7 +13,6 @@ from jenny.command.router import CommandContext, CommandRouter
 from jenny.utils.helpers import build_status_content
 
 if TYPE_CHECKING:
-    from jenny.agent.atlas import AtlasOutcome
     from jenny.agent.dream_review import ReviewOutcome
     from jenny.agent.gardener import GardenerOutcome
 
@@ -607,64 +606,6 @@ def _format_dream_no_input_message() -> str:
     ])
 
 
-async def cmd_atlas(ctx: CommandContext) -> OutboundMessage:
-    """Manually trigger an Atlas run (rebuild the wiki directory)."""
-    loop = ctx.loop
-    msg = ctx.msg
-    force = ctx.args.strip().lower() == "force"
-
-    async def _run():
-        from jenny.agent.atlas import AtlasStore, run_atlas
-        from jenny.config.loader import load_config
-
-        try:
-            config = load_config()
-            store = AtlasStore.from_config(config.workspace_path, config)
-            outcome = await run_atlas(loop, store=store, force=force)
-            content = _format_atlas_outcome(outcome)
-        except Exception as e:
-            content = f"Atlas failed: {e}"
-        await loop.bus.publish_outbound(OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=content,
-            metadata={"render_as": "text"},
-        ))
-
-    asyncio.create_task(_run())
-    return OutboundMessage(
-        channel=msg.channel, chat_id=msg.chat_id, content="Mapping the wiki...",
-    )
-
-
-def _format_atlas_outcome(outcome: "AtlasOutcome") -> str:
-    """Messaggio utente per un run Atlas.
-
-    Gli esiti "non ho fatto niente" hanno messaggi distinti apposta: un comando
-    che risponde "fatto" senza aver fatto nulla è peggio di uno che dice perché.
-    """
-    elapsed = f"{outcome.elapsed:.1f}s"
-    if outcome.status == "skipped_no_wikis":
-        return (
-            "Atlas found no wikis to map.\n\n"
-            "It reads `workspace/wikis/<name>/wiki/`. Ask me to create a wiki first, "
-            "then run `/atlas` again."
-        )
-    if outcome.status == "skipped_unchanged":
-        return (
-            "The wiki hasn't changed since the last Atlas run, so `memory/WIKI.md` is "
-            "already current — no tokens spent. Use `/atlas force` to rebuild it anyway."
-        )
-    if outcome.status == "written":
-        return f"Atlas updated `memory/WIKI.md` in {elapsed}."
-    if outcome.status == "no_write":
-        return (
-            f"Atlas finished in {elapsed} without writing (attempts blocked or refused); "
-            "the wiki fingerprint was not advanced, so the next run will retry."
-        )
-    if outcome.status == "incomplete":
-        return f"Atlas did not complete after {elapsed}; the directory was left untouched."
-    return f"Atlas failed after {elapsed}: {outcome.detail}"
-
-
 async def cmd_gardener(ctx: CommandContext) -> OutboundMessage:
     """Run one gardener pass on a project, now.
 
@@ -673,7 +614,7 @@ async def cmd_gardener(ctx: CommandContext) -> OutboundMessage:
     **senza di lui il passo non è collaudabile**. I tre orologi dell'innesco
     (delta, trenta minuti di fermo, sei ore di distanza) rendono la strada
     naturale impossibile da percorrere in una sessione di prova, ed è la stessa
-    ragione per cui ``/atlas`` e ``/dream`` esistono.
+    ragione per cui ``/dream`` esiste.
 
     **Non prende argomenti** (31/08/2026). Prendeva il nome di un progetto — il
     telecomando dalla chat personale — e sette parole riservate che invece di
@@ -761,7 +702,7 @@ def _gardener_no_target() -> str:
 def _format_gardener_outcome(name: str, outcome: "GardenerOutcome") -> str:
     """Messaggio utente per una passata.
 
-    Gli esiti "non ho fatto niente" hanno frasi distinte, come per Atlas: un
+    Gli esiti "non ho fatto niente" hanno frasi distinte, come per Dream: un
     comando che risponde "fatto" senza aver fatto niente è peggio di uno che dice
     perché — e qui i modi di non fare niente sono tre, e vogliono dire cose molto
     diverse.
@@ -1056,8 +997,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/goal ", cmd_goal)
     router.exact("/dream", cmd_dream)
     router.prefix("/dream ", cmd_dream)
-    router.exact("/atlas", cmd_atlas)
-    router.prefix("/atlas ", cmd_atlas)
     router.exact("/gardener", cmd_gardener)
     router.prefix("/gardener ", cmd_gardener)
     router.exact("/skill", cmd_skill)

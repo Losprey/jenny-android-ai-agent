@@ -24,6 +24,12 @@ from loguru import logger
 from jenny import __logo__, __version__
 from jenny.config.schema import Config
 
+# Id dei job di sistema che una versione precedente registrava e questa non
+# esegue piu'. ``build`` li ritira dallo store prima di registrare i vivi (v. il
+# commento sul posto e ``CronService.retire_system_job``). Per id e non per
+# nome: un promemoria dell'utente puo' chiamarsi come vuole.
+_RETIRED_SYSTEM_JOBS: tuple[str, ...] = ("atlas",)
+
 
 class GatewayContainer:
     """Costruisce e avvia il grafo del gateway; possiede lo stato di runtime."""
@@ -229,6 +235,12 @@ class GatewayContainer:
         try:
             sync_workspace_templates(self.config.workspace_path)
             self._migrate_wikis()
+            # Stessa promessa e stesso ``except`` della migrazione qui sopra: i
+            # file di un lavoratore ritirato vanno via al primo avvio della
+            # versione che l'ha tolto, o restano sul telefono per sempre.
+            from jenny.runtime.retired_artifacts import sweep_retired_artifacts
+
+            sweep_retired_artifacts(self.config.workspace_path)
             self.template_sync_error = None
         except Exception as exc:
             self.template_sync_error = exc
@@ -412,6 +424,15 @@ class GatewayContainer:
             snapshot_before_dream=self._snapshot_before_dream,
         ).dispatch
 
+        # I lavoratori periodici che questa versione **non esegue piu'**. Il loro
+        # job e' ancora scritto nello store di chi aggiorna — e' cosi' che la
+        # registrazione sotto e' idempotente al riavvio — e senza il suo ramo nel
+        # dispatcher scatterebbe nel vuoto a ogni scadenza, per sempre. Si
+        # ritira per id, prima di registrare i vivi. Elenco chiuso: chi toglie un
+        # lavoratore aggiunge il suo id qui, e nessun altro punto lo conosce.
+        for retired in _RETIRED_SYSTEM_JOBS:
+            self.cron.retire_system_job(retired)
+
         # Register Dream system job (idempotent on restart).
         dream_cfg = config.agents.defaults.dream
         if dream_cfg.enabled:
@@ -424,21 +445,6 @@ class GatewayContainer:
             logger.info("Dream: {}", dream_cfg.describe_schedule())
         else:
             logger.info("Dream: disabled")
-
-        # Register Atlas system job (idempotent on restart). Nessuno snapshot
-        # pre-run come per Dream: Atlas riscrive solo memory/WIKI.md, che è
-        # derivato dalla wiki e viene ricostruito dal run successivo.
-        atlas_cfg = config.agents.defaults.atlas
-        if atlas_cfg.enabled:
-            self.cron.register_system_job(CronJob(
-                id="atlas",
-                name="atlas",
-                schedule=atlas_cfg.build_schedule(),
-                payload=CronPayload(kind="system_event"),
-            ))
-            logger.info("Atlas: {}", atlas_cfg.describe_schedule())
-        else:
-            logger.info("Atlas: disabled")
 
         # Register the Gardener system job (idempotent on restart). Nessuno
         # snapshot pre-run: il giardiniere **aggiunge e promuove**, non riscrive,

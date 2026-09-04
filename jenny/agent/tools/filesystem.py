@@ -122,9 +122,9 @@ class _FsTool(Tool):
         # **una sola**, i tool di sola lettura del gardener, la cui radice e' un
         # progetto (``wikis/<nome>``) e non contiene i media — e li' l'allargamento
         # e' contro lo scopo dichiarato, quindi lo si spegne dal costruttore: v.
-        # ``GardenerStore.build_tools``. Dream e Atlas hanno
+        # ``GardenerStore.build_tools``. Dream ha
         # ``allowed_dir=workspace`` e ``.jenny/media`` sta **dentro** quella
-        # radice, quindi per loro il flag e' inerte e spegnerlo sarebbe un
+        # radice, quindi per lui il flag e' inerte e spegnerlo sarebbe un
         # placebo: farebbe *sembrare* imposto un confine che non cambia. L'unico
         # consumatore vivo del ramo acceso e'
         # ``test_filesystem_tools.py::…test_read_allowed_in_media_dir``, cioe' il
@@ -132,7 +132,7 @@ class _FsTool(Tool):
         # un'immagine).
         self._read_media_dir = read_media_dir
         # "Nessuna directory scrivibile, solo questi file esatti". Serve a un
-        # runner isolato che produce un unico artefatto (Atlas → memory/WIKI.md):
+        # runner isolato che riscrive pochi file noti (Dream → i suoi file di memoria):
         # senza questo, ``allowed_dir=None`` significa "eredita la radice dello
         # scope", cioè l'intero workspace scrivibile. Va usato insieme a
         # ``extra_write_allowed_files``; da solo nega qualunque scrittura.
@@ -272,10 +272,10 @@ class _FsTool(Tool):
         arriva da ``_installation_read_root``, come radice di **sola** lettura in
         ``extra_read_allowed_dirs`` (passo T4.5). Il posto giusto e' quello e non
         qui: allargare la ``return`` qui sotto cambierebbe il confine anche per
-        chi passa ``allowed_dir`` **uguale** al proprio ``workspace`` — Dream,
-        Atlas, e i tool di sola lettura del gardener, che sono costruiti con
+        chi passa ``allowed_dir`` **uguale** al proprio ``workspace`` — Dream
+        e i tool di sola lettura del gardener, che sono costruiti con
         ``workspace=allowed_dir=<progetto>`` proprio per non vedere il resto
-        dell'installazione. Quei tre cadono su questo stesso ramo: la loro
+        dell'installazione. Quei due cadono su questo stesso ramo: la loro
         directory e' una scelta del costruttore che qui non si distingue da uno
         scope, e allargarla e' l'unica cosa che il passo T4.5 non doveva fare.
         """
@@ -497,7 +497,7 @@ class _FsTool(Tool):
 
         Cioè una voce di ``extra_write_allowed_files``, l'allowlist che un runner
         isolato passa quando il tool esiste *per* riscrivere quei file e nient'altro:
-        memory/MEMORY.md, SOUL.md, USER.md per Dream; memory/WIKI.md per Atlas.
+        memory/MEMORY.md, SOUL.md, USER.md per Dream.
         Confronto sulla forma risolta e con la stessa chiave di
         ``workspace_policy`` — la allowlist è già ciò che ha autorizzato questa
         scrittura, quindi le due forme coincidono per costruzione.

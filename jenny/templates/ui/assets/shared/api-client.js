@@ -399,7 +399,7 @@ class ApiClient {
     return res.json();
   }
 
-  /* Atlas, il giardiniere, e la compattazione delle chat di progetto. */
+  /* Il giardiniere e la compattazione delle chat di progetto. */
   async updateWorkerSettings(params) {
     const res = await this._postWithQuery('/api/settings/workers/update', params);
     if (!res.ok) throw new Error(await this._errorText(res, 'Worker settings update failed'));

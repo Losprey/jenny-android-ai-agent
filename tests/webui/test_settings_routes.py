@@ -442,7 +442,7 @@ async def test_writing_routes_turn_an_unexpected_error_into_a_mute_500(
     ("path", "target", "worker"),
     [
         ("/api/settings/memory/update?enabled=true", "update_memory_settings", "dream"),
-        ("/api/settings/workers/update?atlas_enabled=true", "update_worker_settings", "atlas"),
+        ("/api/settings/workers/update?gardener_enabled=true", "update_worker_settings", "gardener"),
     ],
 )
 async def test_a_failed_write_does_not_rearm_any_job(

@@ -311,7 +311,7 @@ async def test_internal_work_stays_out_even_with_the_switch_on(
     switched_on: AutoCompact,
 ) -> None:
     """La seconda guardia di ``_archive`` non è ridondante e non è coperta dalla
-    manopola: un run di Dream o di Atlas non è una conversazione, e archiviarlo
+    manopola: un run di Dream non è una conversazione, e archiviarlo
     gli toglierebbe la coda di lavoro con cui si ricorda dei propri run."""
     _stale(switched_on, "dream:20260823-120000")
 

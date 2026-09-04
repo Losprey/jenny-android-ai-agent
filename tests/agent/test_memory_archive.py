@@ -488,7 +488,7 @@ class TestItProtectsProseAndNotOnlyBullets:
 class TestTheModelIsToldTheArchiveExists:
     """Un indice che nessuno sa esistere non viene mai aperto.
 
-    È la stessa ragione per cui la rubrica di Atlas sta nel prompt. Un archivio
+    È la stessa ragione per cui l'elenco delle wiki sta nel prompt. Un archivio
     invisibile al modello è, dal suo punto di vista, indistinguibile da una
     cancellazione — e allora tanto varrebbe cancellare.
     """

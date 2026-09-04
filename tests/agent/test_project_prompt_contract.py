@@ -16,8 +16,8 @@ come se fosse il workspace. Tre affermazioni false, tutte misurate il 21/08:
    ``wikis/zz-prova-claude/output/`` — una cartella che nello scaffold non
    esiste (c'è ``outputs/``) — con la motivazione «la radice è riservata ai file
    fissi». Non l'aveva inventata: gliel'avevamo scritta noi.
-3. ``memory/WIKI.md`` — la rubrica di Atlas — elencava tutte le wiki dentro il
-   prompt di ognuna, più persone, progetti e piante.
+3. l'elenco delle wiki (allora una rubrica compilata) entrava nel prompt di
+   ognuna, con persone, progetti e piante.
 
 La riga di confine è: **chi sei viaggia, dove altro lavori no.**
 
@@ -68,7 +68,7 @@ WORKSPACE_FILE_RULES = ("## Where Produced Files Go", "## Which File a Fact Belo
 
 # Titoli di sezione. Anche l'argomento di ``split()``: cambiarli è un rename.
 PROJECT_BLOCK = "# Project Folder"
-WIKI_DIRECTORY = "## Wiki Directory"
+WIKIS = "## Wikis"
 MAP_SECTION = "The map, as it stands"
 PAGES_SECTION = "The pages, as they stand"
 PRODUCED_FILES_RULE = "Files you produce go under"
@@ -156,9 +156,9 @@ _PROJECT_MD_RULES: tuple[tuple[str, str, str], ...] = (
 
 
 # Radice **per test**, mai quella della suite: ``conftest`` ne monta una sola per
-# tutta la sessione, e scriverci dentro un ``memory/WIKI.md`` lo fa trovare a chi
-# gira dopo — successo la prima volta che questo file è stato scritto, e a
-# cadere è stato un test di Atlas a tre cartelle di distanza. I *template* invece
+# tutta la sessione, e scriverci dentro una wiki la fa trovare a chi gira dopo —
+# successo la prima volta che questo file è stato scritto, e a cadere è stato un
+# test a tre cartelle di distanza. I *template* invece
 # vengono da lì e devono continuare a venirne: ``render_template`` legge dal
 # workspace configurato, non dal package.
 def _wiki(root: pathlib.Path, name: str) -> pathlib.Path:
@@ -509,7 +509,7 @@ def test_the_map_is_fenced_because_it_is_content(tmp_path) -> None:
 
 def test_a_long_map_is_cut_and_says_so(tmp_path) -> None:
     """**Mai troncare in silenzio.** Un inventario tagliato zitto si legge come
-    «è tutto qui» — la lezione già scritta in ``AtlasStore``. Il tetto è la rete,
+    «è tutto qui» — la lezione già pagata dagli inventari. Il tetto è la rete,
     non la norma: una mappa oltre soglia sta assorbendo contenuto che spetta alle
     pagine, e il lint (T5) lo dirà.
     """
@@ -761,22 +761,22 @@ def test_the_workspace_file_rules_step_aside_inside_a_project(tmp_path) -> None:
 
 
 def _with_directory(root: pathlib.Path) -> pathlib.Path:
+    """Due altre wiki con uno scope riconoscibile: e' quel che il blocco elenca."""
     (root / "memory").mkdir(exist_ok=True)
-    (root / "memory" / "WIKI.md").write_text(
-        "# Wiki Directory\n\n## Wikis\n"
-        "- **patreon-creator** — 53 pagine → wikis/patreon-creator/wiki/index.md\n"
-        "- **android-rom** — 32 pagine → wikis/android-rom/wiki/index.md\n"
-        "\n## Plants\n- **Monstera Adansonii**\n",
-        encoding="utf-8",
-    )
+    for name, scope in (("patreon-creator", "il canale e i suoi post"),
+                        ("android-rom", "partizioni Android, Monstera Adansonii a parte")):
+        project = _wiki(root, name)
+        (project / "AGENTS.md").write_text(
+            f"---\nsummary: {scope}\n---\n\n# {name}\n", encoding="utf-8"
+        )
     return root
 
 
 def test_a_project_prompt_does_not_name_another_project(tmp_path) -> None:
     """Formulata sull'effetto e non sul mezzo.
 
-    "Non contiene ``## Wiki Directory``" resterebbe verde il giorno in cui la
-    rubrica cambia forma o arriva da un'altra parte; questa no.
+    "Non contiene ``## Wikis``" resterebbe verde il giorno in cui l'elenco
+    cambia forma o arriva da un'altra parte; questa no.
     """
     root = _with_directory(tmp_path)
     for name in ("patreon-creator", "android-rom", "etf-finance"):
@@ -792,7 +792,7 @@ def test_the_personal_chat_keeps_the_directory(tmp_path) -> None:
     """Lì è portante: un indice che nessuno sa esistere non viene mai aperto."""
     root = _with_directory(tmp_path)
     prompt = ContextBuilder(root).build_system_prompt(session_key="unified:default")
-    assert WIKI_DIRECTORY in prompt
+    assert WIKIS in prompt
     assert "patreon-creator" in prompt
 
 
@@ -809,7 +809,7 @@ def test_the_directory_is_gated_on_the_session_not_on_the_folder(tmp_path) -> No
         workspace=project, session_key="internal:dream"
     )
     assert PROJECT_BLOCK in prompt
-    assert WIKI_DIRECTORY in prompt
+    assert WIKIS in prompt
 
 
 def test_long_term_memory_does_not_travel_into_a_project(tmp_path) -> None:
@@ -1796,7 +1796,7 @@ def test_the_block_says_which_pages_these_are(tmp_path) -> None:
 # c'e', quindi i valori assoluti qui sopra non sono quelli del dispositivo: vale il
 # prima/dopo, non il numero. L'identita' byte-per-byte non ne dipende (vale su qualunque
 # corpo); i millisecondi si'.
-# conteggio, dell'inventario del giardiniere e di quello di Atlas, tutti invariati
+# conteggio, dell'inventario del giardiniere, tutti invariati
 # — e questi test tengono ferma la ragione per cui lo è.
 #
 # La misura: la wiki vera più grande (139 pagine) passa da 5,3 a 3,4 ms, tutte e

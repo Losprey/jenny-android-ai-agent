@@ -347,12 +347,12 @@ Schedules reminders and recurring work. Actions: `add`, `list`, `remove`.
   - A monitor still costs a full turn every cycle even when it says nothing. Silence saves the notification, not the tokens.
   - The mode is fixed at creation: to change it, remove the job and create it again.
 - `remove` needs a `job_id` from `list`.
-- System-managed jobs show up in `list` for transparency but are **protected** — removal is refused with an explanation, not silently ignored. There are three, and `list` prints the purpose of each next to it: `dream` (memory consolidation), `atlas` (rebuilds `memory/WIKI.md` from your wikis, every 12h by default), and `heartbeat` (checks `HEARTBEAT.md` for tasks you left). Each is registered only if its own config enables it — `agents.defaults.dream.enabled`, `agents.defaults.atlas.enabled`, `gateway.heartbeat.enabled` — so a disabled one is absent from `list` rather than present and idle.
+- System-managed jobs show up in `list` for transparency but are **protected** — removal is refused with an explanation, not silently ignored. `list` prints the purpose of each next to it: `dream` (memory consolidation), `heartbeat` (checks `HEARTBEAT.md` for tasks you left), the [gardener](../using/gardener.md) and the update check. Each is registered only if its own config enables it — `agents.defaults.dream.enabled`, `agents.defaults.gardener.enabled`, `gateway.heartbeat.enabled`, `updates.enabled` — so a disabled one is absent from `list` rather than present and idle.
 - Jobs cannot be created from inside another cron job's own execution (no self-scheduling chains).
 
 Config: no direct user toggle; the default timezone comes from the device/config, not a tool setting.
 
-Gotcha: seeing `dream`, `atlas` and `heartbeat` in the list is expected, not a sign of something wrong — they are Jenny's own periodic jobs, meant to be visible but not removable. To stop one, turn it off in config; there is no way to delete it from the job list.
+Gotcha: seeing `dream`, `gardener` and `heartbeat` in the list is expected, not a sign of something wrong — they are Jenny's own periodic jobs, meant to be visible but not removable. To stop one, turn it off in config; there is no way to delete it from the job list.
 
 ### spawn
 
@@ -575,9 +575,9 @@ Config, under `tools.androidWeb.browser`: `timeout`, `maxSnapshotChars`, `maxRea
 
 ---
 
-## The two internal registries: Dream and Atlas
+## The internal registry: Dream
 
-Neither of Jenny's two memory jobs uses the tool loader or any scope above. Each builds its own small registry by hand, with the write side narrowed to an explicit list of files, so that a run cannot touch anything it wasn't meant to — including the other job's files. Nothing here is reachable from a chat turn, and none of it appears in a tool list the model shows you.
+Dream does not use the tool loader or any scope above. It builds its own small registry by hand, with the write side narrowed to an explicit list of files, so that a run cannot touch anything it wasn't meant to. (The [gardener](../using/gardener.md) does the same inside one project — see its page.) Nothing here is reachable from a chat turn, and none of it appears in a tool list the model shows you.
 
 **Dream** (`jenny/agent/memory.py::build_dream_tools`) gets four tools:
 
@@ -587,17 +587,6 @@ Neither of Jenny's two memory jobs uses the tool loader or any scope above. Each
 | `edit_file` | `skills/`, plus exactly `memory/MEMORY.md`, `SOUL.md`, `USER.md` |
 | `apply_patch` | Same as `edit_file` |
 | `write_file` | `skills/` only |
-
-**Atlas** (`jenny/agent/atlas.py::AtlasStore.build_tools`) gets seven — read wide, write to one file:
-
-| Tool | What it can touch |
-|---|---|
-| `read_file`, `list_dir`, `find_files`, `grep` | The whole workspace, read-only |
-| `write_file`, `edit_file`, `apply_patch` | Exactly one path: `memory/WIKI.md` |
-
-Atlas's write tools are built with `write_files_only=True`, which means **no directory is writable at all** — only the exact file allowlist, and that allowlist has one entry. `MEMORY.md`, `SOUL.md` and `USER.md` are deliberately outside it (they belong to Dream, and two jobs rewriting the same file on different clocks would erase each other), and so is `workspace/wikis/` itself, which is the source Atlas reads from and must never edit.
-
-The asymmetry in reading is intentional too: Atlas gets search tools and Dream doesn't, because Atlas has to survey a wiki tree it did not write, while Dream reads a fixed set of known files.
 
 ## Toggle → where it lives
 

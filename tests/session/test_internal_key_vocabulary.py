@@ -56,7 +56,6 @@ VOCABULARY = frozenset(
         "subagent:",
         "cron:",
         "dream:",
-        "atlas:",
         "gardener:",
         "internal:",
         "heartbeat",

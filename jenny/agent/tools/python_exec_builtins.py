@@ -477,8 +477,8 @@ def _register_builtin_functions(
 
         Gli script della wiki fanno ``Path(root)`` per conto proprio, e la loro
         idea di "relativo" è la cwd del processo (``/`` in ``python_exec``):
-        ``wiki_lint("wikis/main")`` finiva quindi su ``/wikis/main`` mentre
-        ``read_file("wikis/main/...")`` leggeva dal workspace. Passare per
+        ``wiki_lint("wikis/erbario")`` finiva quindi su ``/wikis/erbario`` mentre
+        ``read_file("wikis/erbario/...")`` leggeva dal workspace. Passare per
         ``_enforce_path`` allinea la base e, sotto restrizione, fa fallire subito
         e con un messaggio chiaro una root fuori dal confine invece di lasciar
         morire lo script più a valle.

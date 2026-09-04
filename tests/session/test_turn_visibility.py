@@ -40,7 +40,7 @@ class TestTheDefaultIsTheProvenance:
 
     def test_the_internal_channel_stays_visible(self) -> None:
         """Nessun utente da raggiungere: l'outbound è il valore di ritorno con cui
-        Dream e Atlas leggono l'esito del proprio run, e va preservato."""
+        Dream e il giardiniere leggono l'esito del proprio run, e va preservato."""
         assert (
             _resolve({}, channel=INTERNAL_CHANNEL, session_key="dream:20260810-100000")
             is TurnVisibility.VISIBLE

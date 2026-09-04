@@ -233,17 +233,16 @@ def test_re_arming_the_same_interval_does_not_push_the_next_run_away(tmp_path):
     ("worker", "attr", "value", "expected_ms"),
     [
         ("dream", "interval_h", 4, 4 * 3_600_000),
-        ("atlas", "interval_h", 8, 8 * 3_600_000),
         ("gardener", "interval_min", 45, 45 * 60_000),
     ],
 )
 def test_every_periodic_worker_can_be_re_armed(tmp_path, worker, attr, value, expected_ms):
-    """Dal 31/08/2026 la controparte vale per tutti e tre, non solo per il giardiniere.
+    """Dal 31/08/2026 la controparte vale per tutti e due, non solo per il giardiniere.
 
     Prima esisteva solo la versione del giardiniere, perche' era l'unico con un
     interruttore raggiungibile: le manopole di Dream stavano in ``/dream budget``,
-    che non ne aveva uno, e Atlas non aveva nessuna superficie. Portandole in
-    Impostazioni, spegnere Dream o cambiare l'intervallo di Atlas ha avuto bisogno
+    che non ne aveva uno. Portandole in
+    Impostazioni, spegnere Dream o cambiarne l'intervallo ha avuto bisogno
     dello stesso ri-armo — altrimenti sarebbero due manopole che chiedono un
     riavvio senza dirlo.
     """
@@ -259,7 +258,7 @@ def test_every_periodic_worker_can_be_re_armed(tmp_path, worker, attr, value, ex
     assert described
 
 
-@pytest.mark.parametrize("worker", ["dream", "atlas", "gardener"])
+@pytest.mark.parametrize("worker", ["dream", "gardener"])
 def test_a_worker_that_is_off_is_not_registered_and_is_not_an_error(tmp_path, worker):
     cron = _cron(tmp_path)
     config = Config()

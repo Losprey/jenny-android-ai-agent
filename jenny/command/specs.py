@@ -39,7 +39,7 @@ class BuiltinCommandSpec:
     - ``project`` — agisce su *questo* progetto, che prende dalla chiave di
       sessione (``/gardener``, ``/tidy``, ``/init``);
     - ``personal`` — agisce sulla memoria personale o sull'installazione
-      (``/dream``, ``/atlas``, ``/model``, ``/skill``);
+      (``/dream``, ``/model``, ``/skill``);
     - ``any`` — agisce su *questa conversazione*, qualunque sia (``/new``,
       ``/stop``, ``/status``, ``/history``, ``/goal``, ``/help``).
 
@@ -129,18 +129,6 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         scope_note=(
             "It consolidates the personal memory, which a project conversation never "
             "feeds: what is said in a project stays in that project's pages."
-        ),
-    ),
-    BuiltinCommandSpec(
-        "/atlas",
-        "Run Atlas",
-        "Rebuild the wiki directory in memory/WIKI.md. Add 'force' to skip the change check.",
-        "map",
-        "[force]",
-        scope="personal",
-        scope_note=(
-            "It rebuilds the index of every wiki — which is withheld from a project's "
-            "prompt on purpose, because inside a project that question is already answered."
         ),
     ),
     BuiltinCommandSpec(

@@ -1,20 +1,20 @@
-"""Le manopole dei tre lavoratori periodici, per la schermata Impostazioni.
+"""Le manopole dei due lavoratori periodici, per la schermata Impostazioni.
 
-Dream, Atlas e il giardiniere sono i tre job di sistema registrati all'avvio
+Dream e il giardiniere sono i due job di sistema registrati all'avvio
 (``runtime/container.py``). Le loro manopole vivono in ``config.json`` sotto
-``agents.defaults.{dream,atlas,gardener}`` piu'
+``agents.defaults.{dream,gardener}`` piu'
 ``agents.defaults.compact_projects_when_idle``, e fino a questo modulo la loro
 copertura era a macchia di leopardo: Dream aveva i tetti dentro ``/dream
-budget``, il giardiniere tutto dentro ``/gardener settings``, **Atlas niente**.
-Per spegnere Atlas si editava ``config.json`` a mano — che e' precisamente
-l'incidente da cui il blocco del giardiniere era nato (un ``sed -i`` che ha
-rotto l'etichetta SELinux del file).
+budget``, il giardiniere tutto dentro ``/gardener settings``, e un terzo
+lavoratore, poi ritirato, niente: per spegnerlo si editava ``config.json`` a
+mano — che e' precisamente l'incidente da cui il blocco del giardiniere era
+nato (un ``sed -i`` che ha rotto l'etichetta SELinux del file).
 
 Un comando e' un verbo: fa qualcosa adesso, in questa conversazione. Una
 manopola e' una preferenza che sopravvive al turno, e sta dove stanno le altre
-diciotto. Restano comandi ``/dream``, ``/atlas`` e ``/gardener`` — cioe' i tre
-verbi, che sono la ragione per cui i lavoratori sono collaudabili senza
-aspettare i loro orologi.
+diciotto. Restano comandi ``/dream`` e ``/gardener`` — cioe' i due verbi, che
+sono la ragione per cui i lavoratori sono collaudabili senza aspettare i loro
+orologi.
 
 **Sta su ``/api/`` e non sull'RPC** perche' non porta contenuto: numeri e
 booleani stanno in una query string (v. la docstring di ``webui/commands.py``
@@ -44,7 +44,7 @@ from loguru import logger
 from jenny.channels.http_utils import parse_flag
 from jenny.config import store
 from jenny.config.loader import load_config
-from jenny.config.schema import AtlasConfig, Config, DreamConfig, GardenerConfig
+from jenny.config.schema import Config, DreamConfig, GardenerConfig
 from jenny.webui.settings_api import (
     WebUISettingsError,
     _apply_bool,
@@ -168,19 +168,10 @@ def memory_settings_payload(config: Config | None = None) -> dict[str, Any]:
 
 
 def worker_settings_payload(config: Config | None = None) -> dict[str, Any]:
-    """Atlas, il giardiniere, e la compattazione delle chat di progetto."""
+    """Il giardiniere e la compattazione delle chat di progetto."""
     defaults = (config or load_config()).agents.defaults
-    atlas = defaults.atlas
     gardener = defaults.gardener
     return {
-        "atlas": {
-            "enabled": atlas.enabled,
-            "interval_h": _number(AtlasConfig, "interval_h", atlas.interval_h),
-            "max_context_tokens": _number(
-                AtlasConfig, "max_context_tokens", atlas.max_context_tokens
-            ),
-            "schedule": atlas.describe_schedule(),
-        },
         "gardener": {
             "enabled": gardener.enabled,
             "interval_min": _number(GardenerConfig, "interval_min", gardener.interval_min),
@@ -231,7 +222,6 @@ def _flag(query: QueryParams, *names: str) -> bool:
 # ``enabled`` lascerebbe scritto nel file un valore che nessun job va a leggere
 # (su un gateway partito col lavoratore spento il job non e' registrato).
 MEMORY_REARM_KEYS = ("dream_enabled", "dreamEnabled", "dream_interval_h", "dreamIntervalH")
-ATLAS_REARM_KEYS = ("atlas_enabled", "atlasEnabled", "atlas_interval_h", "atlasIntervalH")
 GARDENER_REARM_KEYS = (
     "gardener_enabled",
     "gardenerEnabled",
@@ -281,7 +271,7 @@ async def update_memory_settings(query: QueryParams) -> dict[str, Any]:
 
 
 async def update_worker_settings(query: QueryParams) -> dict[str, Any]:
-    """Scrive le manopole di Atlas, del giardiniere, e la compattazione progetti.
+    """Scrive le manopole del giardiniere e la compattazione progetti.
 
     ``compact_projects_when_idle`` e' la sola che non vale subito: la legge
     l'agente quando parte, quindi la risposta alza ``requires_restart`` e la UI
@@ -291,21 +281,8 @@ async def update_worker_settings(query: QueryParams) -> dict[str, Any]:
 
     def _apply(config: Config) -> bool:
         defaults = config.agents.defaults
-        atlas = defaults.atlas
         gardener = defaults.gardener
-        changed = _apply_bool(query, atlas, "enabled", "atlas_enabled", "atlasEnabled")
-        changed |= _apply_int(
-            query, atlas, "interval_h", AtlasConfig, "atlas_interval_h", "atlasIntervalH"
-        )
-        changed |= _apply_int(
-            query,
-            atlas,
-            "max_context_tokens",
-            AtlasConfig,
-            "atlas_max_context_tokens",
-            "atlasMaxContextTokens",
-        )
-        changed |= _apply_bool(
+        changed = _apply_bool(
             query, gardener, "enabled", "gardener_enabled", "gardenerEnabled"
         )
         for attr, snake, camel in (

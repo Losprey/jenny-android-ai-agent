@@ -114,24 +114,6 @@ async def test_apply_patch_covers_all_three_in_one_call(dream, atomic_spy):
     assert {p.resolve() for p in _own_files(store)} <= written
 
 
-@pytest.mark.asyncio
-async def test_wiki_file_is_atomic_too(tmp_path, atomic_spy):
-    """La allowlist di Atlas è memory/WIKI.md, ed è stato di Jenny quanto gli altri."""
-    from jenny.agent.atlas import AtlasStore
-
-    store = AtlasStore(tmp_path)
-    store.wiki_file.parent.mkdir(parents=True, exist_ok=True)
-    store.wiki_file.write_text("- voce vecchia\n", encoding="utf-8")
-
-    tools = store.build_tools()
-    result = await tools.get("edit_file").execute(
-        path=str(store.wiki_file), old_text="voce vecchia", new_text="voce nuova",
-    )
-
-    assert "Successfully edited" in result, result
-    assert store.wiki_file.resolve() in [p.resolve() for p in atomic_spy]
-
-
 class TestUserFilesStayInPlace:
     """L'eccezione di ``gotchas.md``: i file dell'utente non diventano atomici."""
 

@@ -36,8 +36,10 @@ from jenny.utils.wiki_paths import (
     LEGACY_WIKI_SCHEMA_FILENAME,
     WIKI_INDEX_FILENAME,
     WIKI_SCHEMA_FILENAME,
+    discover_wiki_roots,
     is_wiki_root,
     iter_wiki_pages,
+    read_wiki_scope,
     wiki_schema_file,
 )
 
@@ -73,9 +75,22 @@ _PROJECT_MAP_MAX_CHARS = 2000
 # ``test_the_page_ceiling_matches_the_budget_the_prompt_has``.
 _PROJECT_PAGES_MAX_CHARS = 6000
 
-# Fallback quando ContextBuilder è costruito senza config (test, tool isolati):
-# stesso valore del default di ``AtlasConfig.max_context_tokens``.
-_DEFAULT_WIKI_DIRECTORY_TOKENS = 1200
+# Tetto del blocco ``## Wikis`` (v. :meth:`ContextBuilder._get_wikis_context`).
+# Costante e non manopola: il blocco e' una riga per wiki, quindi cresce col
+# numero di cartelle sotto ``wikis/`` e con niente altro — dieci wiki sono ~250
+# token. Il tetto e' l'ultima linea di difesa contro uno ``summary:`` scritto
+# come un saggio, non un budget da tarare.
+_WIKIS_BLOCK_MAX_TOKENS = 1500
+
+# La frase che precede l'elenco. E' l'unica prosa del blocco, quindi l'unica
+# cosa che vive in un prompt e non in un meccanismo: cambiarla e' cambiare cosa
+# il modello fa con l'elenco, e va ricalibrato sul telefono
+# (``.agent/retire-atlas-and-main-plan.md``, «Verifica sul telefono»).
+_WIKIS_BLOCK_LEAD = (
+    "Your wikis live under `{wikis_dir}/`. Open `{wikis_dir}/<name>/wiki/index.md` "
+    "before answering about one of these subjects; to find out whether something is "
+    "recorded anywhere, grep `{wikis_dir}/`."
+)
 
 # Il nome del tool che fa da interruttore ad ``agent/scheduling.md``. Costante e
 # non ``CronTool.name``: importare il tool qui tirerebbe dentro tutto il package
@@ -504,10 +519,17 @@ class ContextBuilder:
         disabled_skills: list[str] | None = None,
         orchestrator: bool = False,
         available_tools: Callable[[], list[str]] | None = None,
-        wiki_directory_max_tokens: int | None = None,
+        wikis_dir_name: str = "wikis",
+        wikis_enabled: bool = True,
     ):
         self.workspace = workspace
         self.timezone = timezone
+        # La cartella delle wiki e l'interruttore della funzione, dalla config
+        # (``config.wiki.wikis_dir`` e ``config.wiki.enabled``): il blocco
+        # ``## Wikis`` elenca quel che c'e' in quella cartella, e a funzione
+        # spenta non deve nominarla.
+        self.wikis_dir_name = wikis_dir_name or "wikis"
+        self.wikis_enabled = wikis_enabled
         # Callable e non lista: il registry non esiste ancora quando ``AgentLoop``
         # costruisce questo oggetto, e comunque i tool delle Jenny App cambiano
         # a runtime. Chiuderlo su una lista significherebbe pubblicare un
@@ -518,9 +540,6 @@ class ContextBuilder:
         # descrive tool assenti non e solo contesto sprecato: invita il modello a
         # chiamarli.
         self.orchestrator = orchestrator
-        # Tetto del blocco "Wiki Directory" compilato da Atlas. ``None`` lascia
-        # il default dello schema; il valore reale arriva da AgentLoop.from_config.
-        self.wiki_directory_max_tokens = wiki_directory_max_tokens or _DEFAULT_WIKI_DIRECTORY_TOKENS
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -539,11 +558,11 @@ class ContextBuilder:
 
         ``available_tools`` sono i tool del *turno*. Passarli esplicitamente e
         l'unico modo perche l'inventario descriva un registry sostituito (Dream,
-        Atlas) invece di quello del loop; la callable del costruttore resta il
+        il giardiniere) invece di quello del loop; la callable del costruttore resta il
         default per chi un registry per-turno non ce l'ha.
 
         ``orchestrator`` e per-turno per lo stesso motivo, e per un difetto
-        gemello: era un flag del costruttore, quindi Dream e Atlas — che girano
+        gemello: era un flag del costruttore, quindi Dream e il giardiniere — che girano
         con un registry proprio e con la scrittura come unico mestiere — si
         vedevano recapitare il blocco che dice "non puoi scrivere file, delega
         con ``spawn``". Nessuno dei due ha ``spawn``.
@@ -677,7 +696,7 @@ class ContextBuilder:
         # restava il testo della versione in cui era stato installato.
         #
         # Guardia sul tool e non sul modo: l'orchestratore `cron` ce l'ha
-        # (``CronTool._scopes``), Dream e Atlas no (``build_dream_tools``), e
+        # (``CronTool._scopes``), Dream no (``build_dream_tools``), e
         # fin qui si vedevano recapitare l'istruzione di schedulare con un tool
         # che il loro registry non contiene — lo stesso difetto che il parametro
         # `orchestrator` per-turno è nato per chiudere. ``None`` vuol dire "non
@@ -716,10 +735,10 @@ class ContextBuilder:
             parts.append(render_template("agent/orchestrator.md"))
 
         # Il blocco memoria ha due sottosezioni con due proprietari distinti:
-        # "Long-term Memory" (MEMORY.md, scritto da Dream) e "Wiki Directory"
-        # (memory/WIKI.md, scritto da Atlas). Vanno composte in modo
+        # "Long-term Memory" (MEMORY.md, scritto da Dream) e "Wikis" (l'elenco
+        # delle wiki, letto dal disco). Vanno composte in modo
         # indipendente: annidare la seconda dentro la guardia della prima
-        # farebbe sparire la rubrica ogni volta che MEMORY.md è ancora il
+        # farebbe sparire l'elenco ogni volta che MEMORY.md è ancora il
         # template intatto. Heading unico e ordine fisso tengono stabile il
         # prefisso del prompt per la cache del provider.
         memory_sections: list[str] = []
@@ -757,53 +776,41 @@ class ContextBuilder:
             #
             # Il branching per specie di sessione nel percorso di prompt piu'
             # condiviso che c'e' era la cautela da pesare: e' gia' pagata cinque
-            # righe sotto, dalla rubrica. Questo estende un ``if``, non ne apre uno.
+            # righe sotto, dall'elenco delle wiki. Questo estende un ``if``, non ne apre uno.
             if not (is_project or is_gardener):
                 memory_sections.append(memory)
             elif is_project:
                 # Non al giardiniere: v. la docstring del metodo.
                 memory_sections.append(self.memory.get_memory_pointer_context())
-        # La rubrica di Atlas elenca **tutte** le wiki, piu' persone, progetti e
-        # piante. Nella chat personale e' portante — un indice che nessuno sa
-        # esistere non viene mai aperto — ma dentro un progetto risponde a una
-        # domanda gia' risposta: il progetto l'hai scelto tu prima che il turno
-        # cominciasse. Peggio, elenca otto posti in cui la scrittura rimbalza
-        # (v. il confine del passo 1) e ci porta dentro la vita privata.
+        # L'elenco delle wiki, reso dal disco a ogni build — e **solo nella chat
+        # personale**. Li' e' portante: un indice che nessuno sa esistere non
+        # viene mai aperto. Dentro un progetto risponde a una domanda gia'
+        # risposta — il progetto l'hai scelto tu prima che il turno cominciasse —
+        # ed elenca gli altri soggetti, cioe' la versione di lato della fuga che
+        # il confine dei progetti chiude (v. il confine del passo 1).
         #
-        # Chiusa sulla **sessione** e non sulla cartella: la domanda e' "chi sta
-        # parlando", non "dove si lavora". ``MEMORY.md`` qui sopra segue **la
-        # stessa** regola da quando e' stato misurato che di identita' non ne ha
-        # (v. il cancello sopra): la riga di confine non e' cambiata — chi sei
-        # viaggia, dove altro lavori no — e' cambiata la classificazione di quel
-        # file, che stava nella casella sbagliata. Cio' che viaggia comunque sono
-        # ``SOUL.md`` e ``USER.md``.
+        # Chiuso sulla **sessione** e non sulla cartella: la domanda e' "chi sta
+        # parlando", non "dove si lavora". ``MEMORY.md`` qui sopra segue la
+        # stessa regola — chi sei viaggia, dove altro lavori no — e cio' che
+        # viaggia comunque sono ``SOUL.md`` e ``USER.md``.
         #
         # **E vale anche per il giardiniere** (T7.8), che non e' una
         # conversazione ma ha lo stesso mestiere ristretto: la sua cassetta legge
         # dentro **un** progetto e scrive solo in ``wikis/<nome>/wiki/``
-        # (``GardenerStore.build_tools``, sotto il commento «Lettura: dentro il
-        # progetto. Non l'intera installazione come Atlas»), e ``agent/gardener.md``
-        # gli dice «you are the gardener of one project» e «work only from those».
-        # Misurato il 23/08: la rubrica gli arrivava intera. Le due ragioni di
-        # sopra valgono parola per parola — la scelta del progetto e' gia' stata
-        # fatta (dal cron, non dall'utente, e questo non la rende una domanda
-        # aperta), e la vita privata ci viaggia dentro — e ce n'e' una terza, sua:
-        # e' un elenco di pagine che i **suoi** tool non possono aprire, davanti a
-        # una passata la cui regola 3 e' «una pagina che nomina una cosa che ha una
-        # pagina sua la linka». Il template non nomina la rubrica in nessun punto,
-        # quindi togliergliela non lascia una promessa scoperta (la lezione di
-        # T6.12).
-        #
-        # Il verso e' quello giusto: si **stringe** una lettura, non si allarga
-        # niente. Atlas resta intatto — e' lui che la rubrica la scrive.
-        if not is_project_session_key(session_key or "") and not is_gardener_session_key(session_key):
-            wiki_directory = self.memory.get_wiki_memory_context(self.wiki_directory_max_tokens)
-            if wiki_directory:
-                memory_sections.append(wiki_directory)
+        # (``GardenerStore.build_tools``), e ``agent/gardener.md`` gli dice «you
+        # are the gardener of one project». Un elenco di posti che i **suoi**
+        # tool non possono aprire, davanti a una passata la cui regola 3 e' «una
+        # pagina che nomina una cosa che ha una pagina sua la linka», e' un
+        # invito a sbagliare. Il template non nomina l'elenco in nessun punto,
+        # quindi togliergliela non lascia una promessa scoperta (T6.12).
+        if not (is_project or is_gardener):
+            wikis_block = self._get_wikis_context()
+            if wikis_block:
+                memory_sections.append(wikis_block)
         # Terza sottosezione, e la piu' economica: una riga che dice che il tier
         # freddo esiste. Senza, l'archivio della fase 2 sarebbe indistinguibile
         # da una cancellazione dal punto di vista di chi deve rispondere — ed e'
-        # la stessa ragione per cui la rubrica di Atlas sta qui sopra.
+        # la stessa ragione per cui l'elenco delle wiki sta qui sopra.
         archive = self.memory.get_archive_context()
         if archive:
             memory_sections.append(archive)
@@ -916,6 +923,51 @@ class ContextBuilder:
             # ancora stato estratto: si perde l'inventario, non il prompt.
             return None
 
+    def _get_wikis_context(self) -> str:
+        """Il blocco ``## Wikis``: nome e scope di ogni wiki, letti dal disco.
+
+        **Il prompt conosce le wiki per nome e scope; il contenuto si legge.** E'
+        l'invariante che sostituisce la rubrica compilata da un modello: quel che
+        vale di quella rubrica — l'elenco — era il suo *input*, calcolato qui in
+        Python e ricopiato dal modello ogni sei ore. Reso a ogni build e' piu'
+        fresco (una wiki creata un minuto fa c'e' gia') e non ha uno stato che
+        possa restare indietro.
+
+        Tre scelte, e la ragione di ognuna:
+
+        - **Niente conteggio pagine.** Costerebbe una camminata su ``wiki/`` per
+          wiki per turno (12 ms su undici wiki, misurato per il giardiniere); il
+          blocco deve essere piatto nel numero di pagine, come la riga
+          dell'archivio. Quel che si legge e' una ``listdir`` piu' un ``AGENTS.md``
+          per wiki.
+        - **Lo scope mancante si stampa cosi' com'e'** — ``(no scope set)``. E' il
+          sintomo che fa riempire ``summary:``: una wiki la cui riga non basta a
+          decidere se aprirla e' una wiki da spezzare o da descrivere, e
+          nasconderlo rimetterebbe al riparo esattamente il calderone che questo
+          blocco esiste per rendere visibile.
+        - **Ordine alfabetico** (lo da' gia' ``discover_wikis``): il blocco cambia
+          solo quando cambia una wiki, e il prefisso del prompt resta stabile per
+          la cache del provider.
+
+        Stringa vuota se la funzione e' spenta, se la cartella non c'e' o e'
+        vuota: un blocco che dice «nessuna wiki» e' costo senza informazione.
+        """
+        if not self.wikis_enabled:
+            return ""
+        try:
+            roots = discover_wiki_roots(self.workspace / self.wikis_dir_name)
+        except OSError:
+            return ""
+        if not roots:
+            return ""
+        lines = [
+            f"- **{name}** — {read_wiki_scope(root)} "
+            f"→ {self.wikis_dir_name}/{name}/wiki/index.md"
+            for name, root in roots.items()
+        ]
+        body = _WIKIS_BLOCK_LEAD.format(wikis_dir=self.wikis_dir_name) + "\n" + "\n".join(lines)
+        return "## Wikis\n" + truncate_text_to_tokens(body, _WIKIS_BLOCK_MAX_TOKENS)
+
     def _get_identity(
         self,
         channel: str | None = None,
@@ -955,7 +1007,7 @@ class ContextBuilder:
 
         **Chiuso sul giardiniere e su nessun altro**, perche' il ragionamento e'
         per attore e non per specie: Dream monta ``allowed_dir=workspace``
-        (l'installazione) piu' ``skills/``, Atlas legge l'installazione intera, un
+        (l'installazione) piu' ``skills/``, un
         subagent ha la radice di lettura dell'installazione (T4.5), e una
         conversazione di progetto legge ovunque per contratto di
         ``agent/project.md``. Per tutti quelli i tre percorsi sono raggiungibili, e
@@ -1062,8 +1114,8 @@ class ContextBuilder:
 
         **Il tetto non tronca in silenzio.** Oltre soglia si taglia e si dice che
         continua: un inventario tagliato zitto si legge come "e' tutto qui", ed e'
-        la stessa lezione che ``AtlasStore`` ha imparato col suo
-        ``_MAX_INVENTORY_ENTRIES``. Il tetto e' la rete, non la norma — una mappa
+        la stessa lezione dell'inventario del giardiniere, che oltre soglia lo
+        dice. Il tetto e' la rete, non la norma — una mappa
         oltre soglia sta assorbendo contenuto che spetta alle pagine, e il lint
         (T5) lo dira'.
 
@@ -1287,7 +1339,7 @@ class ContextBuilder:
         anche verso una passata interna il cui unico posto scrivibile e'
         ``wikis/<nome>/wiki/``. Non e' una dimenticanza: e' la riga «chi sei
         viaggia, dove altro lavori no», e quel che si chiude sulla sessione e'
-        l'inventario fra progetti (la rubrica di Atlas, e la coda di
+        l'inventario fra progetti (l'elenco delle wiki, e la coda di
         ``read_recent_history_for_prompt``), non i tre file di identita'. Chi
         arriva qui pensando di simmetrizzare il confine legga prima
         ``.agent/security.md``: togliere l'identita' a un attore vuol dire

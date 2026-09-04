@@ -234,7 +234,22 @@ def _rotate_backup(path: Path) -> None:
         logger.warning("Could not refresh the config backup: {}", e)
 
 
-def _merge_unknown(raw: Any, dumped: Any) -> Any:
+# Chiavi che una versione precedente scriveva e questa **ha ritirato**. Sono la
+# terza specie, dopo "conosciuta" e "sconosciuta", e serve perche' le altre due
+# non la coprono: ``_merge_unknown`` conserva per progetto quel che lo schema non
+# conosce (potrebbe venire da una versione piu' nuova), quindi una chiave tolta
+# dallo schema resterebbe nel file **per sempre** — e con lei il warning di
+# ``load_config_with_raw`` a ogni caricamento. Qui non si avvisa e non si
+# conserva: alla prossima scrittura cade. Percorsi con l'alias JSON (camelCase)
+# e, dove il file puo' portarla, la forma snake_case.
+RETIRED_KEY_PATHS: frozenset[str] = frozenset({
+    "agents.defaults.atlas",
+    "wiki.defaultWiki",
+    "wiki.default_wiki",
+})
+
+
+def _merge_unknown(raw: Any, dumped: Any, prefix: str = "") -> Any:
     """Restituisce *dumped* con le chiavi presenti solo in *raw* riportate dentro.
 
     Ricorsivo sui dizionari. Le liste vengono sostituite in blocco: allineare
@@ -242,27 +257,37 @@ def _merge_unknown(raw: Any, dumped: Any) -> Any:
     quale) che qui non abbiamo, e indovinarla è peggio che perdere una chiave
     ignota dentro un elemento di array — caso segnalato comunque dal warning
     in ``load_config_with_raw``.
+
+    Le chiavi in :data:`RETIRED_KEY_PATHS` **non** vengono riportate: e' l'unico
+    punto in cui una chiave ritirata smette di esistere nel file.
     """
     if not isinstance(raw, dict) or not isinstance(dumped, dict):
         return dumped
     merged = dict(dumped)
     for key, raw_value in raw.items():
+        where = f"{prefix}{key}"
         if key not in merged:
-            merged[key] = raw_value
+            if where not in RETIRED_KEY_PATHS:
+                merged[key] = raw_value
         else:
-            merged[key] = _merge_unknown(raw_value, merged[key])
+            merged[key] = _merge_unknown(raw_value, merged[key], f"{where}.")
     return merged
 
 
 def _unknown_key_paths(raw: Any, dumped: Any, prefix: str = "") -> list[str]:
-    """Elenca i percorsi delle chiavi presenti in *raw* ma non nel dump del modello."""
+    """Elenca i percorsi delle chiavi presenti in *raw* ma non nel dump del modello.
+
+    Una chiave ritirata non e' sconosciuta: non compare, o il warning che questa
+    lista alimenta suonerebbe a ogni caricamento fino alla prima riscrittura.
+    """
     if not isinstance(raw, dict) or not isinstance(dumped, dict):
         return []
     unknown: list[str] = []
     for key, raw_value in raw.items():
         where = f"{prefix}{key}"
         if key not in dumped:
-            unknown.append(where)
+            if where not in RETIRED_KEY_PATHS:
+                unknown.append(where)
             continue
         if isinstance(raw_value, dict):
             unknown.extend(_unknown_key_paths(raw_value, dumped[key], f"{where}."))

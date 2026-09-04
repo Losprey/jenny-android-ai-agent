@@ -2,7 +2,7 @@
 
 Capture, inside a [project](./projects.md), is deliberately cheap: a fact you mention becomes one line in that day's journal and nothing more. The **gardener** is what happens to those lines afterwards. It is a background pass that runs between conversations, reads the journal lines nobody has read yet, turns the ones that earn it into pages, and brings the map back in line with what now exists.
 
-It is the third periodic worker after [Dream and Atlas](./memory.md), and like them it is **on by default**. Unlike them, it writes inside *your* folders rather than a derived file — which is why almost everything below is about what it will not touch.
+It is the second periodic worker after [Dream](./memory.md), and like it, it is **on by default**. Unlike Dream, it writes inside *your* folders rather than the memory files — which is why almost everything below is about what it will not touch.
 
 ## What one pass does
 
@@ -58,7 +58,7 @@ And these rules govern what it does inside `wiki/`:
 
 A pass is given: the unread journal lines, the map, the list of pages that exist (marked with which of them are already over the page budget), your recent messages in that project's conversation, and Jenny's identity files (`SOUL.md`, `USER.md`, `memory/MEMORY.md`).
 
-It is **not** given the cross-project wiki directory (`memory/WIKI.md`) or the tail of your personal conversation. Both used to arrive and were closed deliberately: the choice of project has already been made, and a maintenance pass with no user to talk to has no business carrying either your private life or an inventory of your other projects into a page you will read. Jenny's identity stays, because the pass writes prose you read and the alternative is the one actor with no idea who it is writing for.
+It is **not** given the list of your other wikis (the `## Wikis` block) or the tail of your personal conversation. Both used to arrive and were closed deliberately: the choice of project has already been made, and a maintenance pass with no user to talk to has no business carrying either your private life or an inventory of your other projects into a page you will read. Jenny's identity stays, because the pass writes prose you read and the alternative is the one actor with no idea who it is writing for.
 
 The transcript it sees is a window — the recent stretch, capped — not the whole record.
 
@@ -117,6 +117,6 @@ An out-of-range number in a `config.json` written by an older version is **clamp
 ## See also
 
 - [Projects](./projects.md) — what a project is, capture, the map and the pages, and the history fence.
-- [Memory, Dream and Atlas](./memory.md) — the other two periodic workers, and the personal memory files.
+- [Memory and Dream](./memory.md) — the other periodic worker, and the personal memory files.
 - [Wiki](./wiki.md) — reading and auditing the pages the gardener writes.
 - [Configuration (config.json)](../reference/configuration.md) — the full config reference.

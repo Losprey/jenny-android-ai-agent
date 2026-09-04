@@ -162,7 +162,7 @@ async def test_the_media_dir_is_inside_what_the_widening_already_opens(install: 
     (``<workspace>/.jenny/media``, v. ``get_data_dir``), quindi per un tool
     costruito da ``create()`` quel flag e' ora ridondante — non e' una seconda
     radice, e' un pezzo della prima. Resta necessario per chi ha una restrizione
-    esplicita del costruttore piu' stretta (Atlas, i tool di lettura del
+    esplicita del costruttore piu' stretta (i tool di lettura del
     gardener), ed e' l'unica ragione per non toglierlo.
 
     E si', da dentro un progetto ci si deve arrivare: la' finiscono gli allegati

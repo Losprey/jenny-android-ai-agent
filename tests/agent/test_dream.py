@@ -1175,8 +1175,8 @@ class TestEphemeralHooks:
 
     Fino al 25/08 la condizione era ``not ephemeral`` secca, e l'unico hook extra
     che l'installazione monta è la contabilità dei token: «effimero» voleva quindi
-    dire «non misurato». Misurato su ``token-usage.json``: in 27 giorni i bucket
-    ``dream`` e ``atlas`` non erano comparsi **una volta**, con Dream che gira ogni
+    dire «non misurato». Misurato su ``token-usage.json``: in 27 giorni il bucket
+    ``dream`` non era comparso **una volta**, con Dream che gira ogni
     due ore. Ora la scelta la dichiara l'hook (``runs_when_ephemeral()``), e il
     default resta ``False`` — cioè il contratto qui sotto non è cambiato per chi
     non dice niente.
@@ -1245,7 +1245,7 @@ class TestEphemeralHooks:
     ):
         """L'eccezione, ed è quella che vale il cambio: misurare non è parlare.
 
-        Il lavoro effimero — Dream, Atlas, la revisione, il giardiniere — è
+        Il lavoro effimero — Dream, la revisione, il giardiniere — è
         esattamente quello che l'utente non ha chiesto e non vede arrivare, cioè
         quello che conviene misurare di più. `TokenUsageHook` è l'unico che lo
         dichiara.

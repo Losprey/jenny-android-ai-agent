@@ -56,8 +56,8 @@ android {
         // uno di quelli e' installato. Pubblicare a 12 avrebbe significato non
         // poter provare l'aggiornamento proprio sul dispositivo che lo riceve:
         // l'updater pretende un codice STRETTAMENTE maggiore di quello installato.
-        versionCode = 14
-        versionName = "0.9.5"
+        versionCode = 15
+        versionName = "0.10.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
@@ -213,7 +213,7 @@ gradle.taskGraph.whenReady {
 // Copy skill scripts as raw Android assets (Chaquopy compiles .py files
 // into .imy, making them unreadable via importlib.resources. By also
 // mirroring them as assets, scripts remain extractable at runtime.)
-val copyScriptAssets by tasks.registering(Copy::class) {
+val copyScriptAssets by tasks.registering(Sync::class) {
     from("../../jenny/skills") {
         include("**/scripts/*.py")
     }
@@ -223,7 +223,7 @@ val copyScriptAssets by tasks.registering(Copy::class) {
 // Mirror the whole jenny package as plain .py assets so the agent can
 // read its own source on-device (extracted at gateway startup by
 // jenny.utils.android_assets.extract_jenny_source).
-val copyPackageSourceAssets by tasks.registering(Copy::class) {
+val copyPackageSourceAssets by tasks.registering(Sync::class) {
     from("../../jenny") {
         include("**/*.py")
         exclude("**/__pycache__/**")

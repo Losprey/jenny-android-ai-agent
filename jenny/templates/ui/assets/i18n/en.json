@@ -65,9 +65,6 @@
     "dream": {
       "title": "Consolidate memory now"
     },
-    "atlas": {
-      "title": "Rebuild the wiki directory"
-    },
     "gardener": {
       "title": "Turn the journal into pages"
     },
@@ -195,11 +192,6 @@
     "workers": {
       "title": "Wiki and projects",
       "unavailable": "The periodic worker settings could not be read. Reopen this screen; if it stays like this, check config.json.",
-      "atlas": "Atlas",
-      "atlasEnabled": "Periodic directory",
-      "atlasInterval": "Every how many hours",
-      "atlasMaxContext": "Directory budget in context (tokens)",
-      "atlasHint": "Atlas compiles the index of every wiki into memory/WIKI.md. With an unchanged wiki a tick costs nothing, and the index goes into every personal-chat prompt — not into a project's.",
       "gardener": "Gardener",
       "gardenerEnabled": "Periodic pass",
       "gardenerOffHint": "Turning it off is not uninstalling it: /gardener inside a project still runs a pass by hand.",

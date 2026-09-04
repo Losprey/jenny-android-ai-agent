@@ -254,10 +254,10 @@ def _alert_gardener_stuck(name: str, failures: int, status: str) -> None:
 
 GARDENER_JOB_ID = "gardener"
 
-# I tre lavoratori periodici, col nome del loro job e il campo di config che li
+# I due lavoratori periodici, col nome del loro job e il campo di config che li
 # tara. Elenco chiuso e non un getattr sul nome: chi aggiunge un lavoratore lo
-# registra qui, e chi legge vede in tre righe quali sono.
-_SYSTEM_WORKERS: tuple[str, ...] = ("dream", "atlas", "gardener")
+# registra qui, e chi legge vede in due righe quali sono.
+_SYSTEM_WORKERS: tuple[str, ...] = ("dream", "gardener")
 
 
 def refresh_system_job(
@@ -284,12 +284,12 @@ def refresh_system_job(
     Ritorna la descrizione della pianificazione armata, o ``None`` se il
     lavoratore è spento: a spegnere non si deregistra niente — non esiste una
     controparte di ``register_system_job`` — e il cancello è quello di dispatch
-    (``CronDispatcher._run_dream`` / ``_run_atlas`` / ``_run_gardener``).
+    (``CronDispatcher._run_dream`` / ``_run_gardener``).
 
-    **Vale per tutti e tre e non solo per il giardiniere** (31/08/2026). Prima
+    **Vale per tutti e due e non solo per il giardiniere** (31/08/2026). Prima
     esisteva solo la versione del giardiniere, perché era l'unico con un
-    interruttore raggiungibile; portando le manopole in Impostazioni, Dream e
-    Atlas hanno guadagnato lo stesso interruttore e avevano bisogno della stessa
+    interruttore raggiungibile; portando le manopole in Impostazioni, anche
+    Dream ha guadagnato lo stesso interruttore e aveva bisogno della stessa
     controparte.
     """
     from jenny.config.loader import load_config
@@ -369,8 +369,8 @@ class CronDispatcher:
     async def dispatch(self, job: "CronJob") -> str | None:
         """Execute a cron job through the agent.
 
-        Il wakelock sta **qui** e non solo in ``run_bound_cron_job`` perché dream,
-        atlas e heartbeat non passano affatto da quel modulo: entrano da
+        Il wakelock sta **qui** e non solo in ``run_bound_cron_job`` perché dream
+        e heartbeat non passano affatto da quel modulo: entrano da
         ``process_direct``, che non è il percorso di turno coperto da
         ``AgentLoop._dispatch``. Questo è l'unico punto attraversato da tutti e
         quattro i tipi di job. Sul ramo bound i due blocchi si annidano sullo
@@ -387,8 +387,6 @@ class CronDispatcher:
 
         if job.name == "dream":
             return await self._run_dream(agent)
-        if job.name == "atlas":
-            return await self._run_atlas(agent)
         if job.name == "gardener":
             return await self._run_gardener(agent)
         if job.name == "heartbeat":
@@ -404,23 +402,10 @@ class CronDispatcher:
         )
         raise CronJobSkippedError(reason)
 
-    async def _run_atlas(self, agent: "CronCapableAgent") -> str | None:
-        """Atlas: ricompila memory/WIKI.md dalla wiki. Silenzioso per costruzione.
-
-        Tutta la logica sta in ``jenny.agent.atlas.run_atlas``, condivisa con lo
-        slash command ``/atlas``: qui resta solo l'instradamento e il log.
-        """
-        from jenny.agent.atlas import AtlasStore, run_atlas
-
-        store = AtlasStore.from_config(self._config.workspace_path, self._config)
-        outcome = await run_atlas(agent, store=store)
-        logger.debug("Atlas cron job: {}", outcome.status)
-        return None
-
     async def _run_gardener(self, agent: "CronCapableAgent") -> str | None:
         """Il giardiniere: una passata su un progetto, se uno è pronto.
 
-        Come per Atlas, qui resta solo l'instradamento: i tre orologi stanno in
+        Come per Dream, qui resta solo l'instradamento: i tre orologi stanno in
         ``agent/gardener_schedule.py`` e la passata in ``agent/gardener.py``,
         condivisa con lo slash command ``/gardener``.
 
@@ -728,7 +713,7 @@ class CronDispatcher:
         # Il run ha scritto, ma il batch è atterrato? Sono due domande diverse e
         # fino al 2026-08-18 se ne faceva una sola (v.
         # ``dream_cycle.batch_was_not_consolidated``). Sta dopo il gate e non
-        # dentro perché ``internal_run_should_commit`` è condiviso con Atlas, che
+        # dentro perché ``internal_run_should_commit`` è condiviso col giardiniere, che
         # non ha un batch di storia da far atterrare.
         # Il tool per voci del run appena concluso. ``getattr`` con un default
         # perché ``build_dream_tools`` è sostituito nei test da doppi che non lo
@@ -871,7 +856,7 @@ class CronDispatcher:
         # (``agent/turn_types.py``, da ``ctx.spoke_via_tool``). Non arriva qui
         # perché ``process_direct`` restituisce per contratto il *payload* e non
         # l'esito — scelta deliberata, documentata nella sua docstring — e
-        # cambiarla vorrebbe dire toccare la firma condivisa da Dream, Atlas,
+        # cambiarla vorrebbe dire toccare la firma condivisa da Dream,
         # heartbeat e dai comandi. La strada alternativa (un deliverer iniettato
         # nel dispatcher) è chiusa apposta: v. la docstring di questo modulo e
         # ``runtime/container.py``.
