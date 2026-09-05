@@ -188,12 +188,21 @@ ma la richiesta: è la richiesta che costa.
 al sidecar e sempre attive, anche a `mascotMood=false`:
 - frame `error` → `sad`, subito;
 - `thinking` da più di 20 s senza frame → `worried` (si toglie al primo frame utile);
-- arrivo di un turno **non** suo mentre è `idle` (l'avviso proattivo: `message`
-  con `turn_id` diverso e nessun turno in corso) → saluto `hello1/hello2` per due
-  cicli, che è arte già pronta.
+- ~~arrivo di un turno non suo mentre è `idle` → saluto `hello1/hello2`~~
+  **Rinviato (05/09).** Nel codice quel caso non esiste: a mascotte ferma il
+  primo frame che apre un turno viene *adottato* (`_trackedTurnMatches`) e
+  animato come parlato, avviso proattivo compreso. Un saluto *prima* del parlato
+  vuole una coda di animazioni che oggi non c'è; l'arte c'è, il posto no.
 Non si fa l'euristica lessicale sul testo (emoji, "purtroppo"…): con il sidecar
 acceso è ridondante e con il sidecar spento darebbe una faccia sbagliata abbastanza
 spesso da rompere l'illusione — meglio nessuna faccia che quella sbagliata.
+
+*Com'è uscito (05/09):* `error` → `sad` in entrambe le viste; il pensa oltre
+20 s → `worried` via un timer armato in `_setAgentState('thinking')` e disarmato
+da ogni altro stato. Un cambio di stato verso `thinking`/`talking` azzera
+l'umore precedente (una risposta neutra non manderebbe niente e la faccia
+vecchia riapparirebbe a parlato finito); la preoccupazione nasce dopo
+l'azzeramento e sopravvive.
 
 **D11 — L'umore è uno strato sopra lo stato, non un quarto stato.** In
 `JennyCompanion`: `this._mood = null`, `this._moodUntil = 0`, `this._moodTurnId`.
@@ -224,7 +233,11 @@ dato c'è già.
 il meccanismo sul telefono senza disegnare: `happy → hello1`, `surprised → talk1a`
 (bocca aperta, mano alzata), `worried → think`, `sad → ground` (a terra, stordita).
 Sono approssimazioni dichiarate, in una costante `MOOD_ART` con un commento che
-dice quale voce è provvisoria. L'arte vera: 4 pose × 2 varianti =
+dice quale voce è provvisoria. **Deciso il 05/09/2026: le immagini non sono
+pronte e questo lavoro non le prevede** — nessuna chiave nuova in `ART`, nessuna
+riga in `FILES` o nel manifest; un contratto in `tests/webui` pretende che ogni
+posa presa in prestito esista e sia già nel manifest. Il passo 7 resta scritto
+per quando l'arte arriverà, fuori da questo PR. L'arte vera: 4 pose × 2 varianti =
 **8 PNG 3000×3000** (`mood_happy.PNG`, `mood_happy_color.PNG`, …), 4 righe in
 `FILES`, 8 righe in `_UI_MANIFEST`, 4 chiavi in `ART`, e la tabella in
 `COLORARE_LE_POSE.md`. Nessuna variante `side`: v. D11.

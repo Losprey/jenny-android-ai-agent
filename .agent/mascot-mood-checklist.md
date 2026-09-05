@@ -9,7 +9,10 @@ Ramo: `feat/mascot-mood`, aperto il 05/09/2026 da `main` (a9349ac, con
 05/09/2026**: 9.145 test verdi su 3.14, i tre file toccati verdi anche su 3.11,
 lint e pyright puliti. **Passo 2 girato il 05/09/2026**: 9.178 test su 3.14,
 366 su 3.11 nelle aree toccate; le due righe di `configuration.md` (4.2) sono
-entrate qui perché la pagina promette ogni chiave.
+entrate qui perché la pagina promette ogni chiave. **Passi 3 e 4 girati il 05/09/2026**:
+9.190 test su 3.14, 276 su 3.11 (client, sessione); `MOOD_ART` provvisoria sulle
+pose esistenti per decisione dell'utente — niente arte prevista, il passo 7 resta
+per dopo, fuori da questo PR.
 
 Comandi di verifica per ogni passo (da `AGENTS.md`, con la correzione locale:
 `python3 -m pytest`, non `pytest`):
@@ -75,32 +78,33 @@ un force-push.
 
 ## Passo 3 — il client *(un commit)*
 
-- [ ] **3.1** `mobile-jenny.js`: `MOOD_ART` provvisoria con commento, `MOOD_HOLD_MS`,
+- [x] **3.1** `mobile-jenny.js`: `MOOD_ART` provvisoria con commento, `MOOD_HOLD_MS`,
       `_mood`/`_moodUntil`/`_moodTurnId`
-- [ ] **3.2** `case 'mascot_mood'` in `_handleWsMessage` **prima** della guardia
+- [x] **3.2** `case 'mascot_mood'` in `_handleWsMessage` **prima** della guardia
       `onScreen`, e in `_handleChatStream`
-- [ ] **3.3** `_syncArt`: umore solo se `out`, `idle`, non in volo, non in parlato
-- [ ] **3.4** Livello 0: `error` → `sad`; `thinking` > 20 s → `worried`; turno
-      estraneo a mascotte `idle` → saluto `hello1/hello2`
-- [ ] **3.5** `chat:sent` azzera l'umore; frame scartato con turno in corso o
+- [x] **3.3** `_syncArt`: umore solo se `out`, `idle`, non in volo, non in parlato
+- [x] **3.4** Livello 0: `error` → `sad`; `thinking` > 20 s → `worried`; ~~turno
+      estraneo a mascotte `idle` → saluto~~ rinviato: quel caso nel codice non
+      esiste, il turno viene adottato e parlato (v. piano, D10)
+- [x] **3.5** `chat:sent` azzera l'umore; frame scartato con turno in corso o
       `turn_id` diverso dall'ultimo chiuso
-- [ ] **3.6** Preload delle pose d'umore
-- [ ] **3.7** `mobile-chat.js` non logga sul frame nuovo (verificato, nessuna modifica)
-- [ ] **3.8** Test: `tests/webui/test_mascot_mood_client.py` (node, `this` finto)
-- [ ] **3.9** Test: contratto `MOODS` (Python) ↔ `MOOD_ART` (JS) ↔ chiavi arte esistenti
-- [ ] **3.10** Verifica completa verde; commit `-s`
+- [x] **3.6** Preload delle pose d'umore
+- [x] **3.7** `mobile-chat.js` non logga sul frame nuovo (verificato, nessuna modifica)
+- [x] **3.8** Test: `tests/webui/test_mascot_mood_client.py` (node, `this` finto)
+- [x] **3.9** Test: contratto `MOODS` (Python) ↔ `MOOD_ART` (JS) ↔ chiavi arte esistenti
+- [x] **3.10** Verifica completa verde; commit `-s`
 
 ## Passo 4 — documentazione *(stesso PR)*
 
-- [ ] **4.1** `docs/reference/websocket.md`: frame `mascot_mood`
+- [x] **4.1** `docs/reference/websocket.md`: frame `mascot_mood`
 - [x] **4.2** `docs/reference/configuration.md`: i due campi (fatto col passo 2)
-- [ ] **4.3** `docs/using/themes-mascot.md`: sezione *Espressioni*
-- [ ] **4.4** `android/image_source/README.md`: pose d'umore e mappa provvisoria
-- [ ] **4.5** Deriva dei default corretta in `themes-mascot.md` e `settings.md`:
+- [x] **4.3** `docs/using/themes-mascot.md`: sezione *Espressioni*
+- [x] **4.4** `android/image_source/README.md`: pose d'umore e mappa provvisoria
+- [x] **4.5** Deriva dei default corretta in `themes-mascot.md` e `settings.md`:
       taglia *Small* (120 px), lato *sinistro* come ricordo dell'ultimo
       atterraggio; riga "Mascot position" tolta se il controllo non esiste più
       (verificato in `mobile-settings.js`), conteggio delle opzioni aggiornato
-- [ ] **4.6** Nessun file di `docs/` spostato o rinominato
+- [x] **4.6** Nessun file di `docs/` spostato o rinominato
 
 ## Passo 5 — sul telefono *(nessun codice; misure nel piano)*
 
@@ -123,7 +127,7 @@ un force-push.
 - [ ] **6.3** `docs/reference/settings.md`
 - [ ] **6.4** Test route + verifica verde; commit `-s`
 
-## Passo 7 — l'arte *(indipendente dal 6)*
+## Passo 7 — l'arte *(indipendente dal 6; fuori da questo PR per decisione del 05/09)*
 
 - [ ] **7.1** 8 PNG 3000×3000 in `android/image_source/` (`mood_<x>.PNG` + `_color`)
 - [ ] **7.2** `gen_pose_webp.py::FILES` (+4), rigenerato
