@@ -7,7 +7,7 @@ import binascii
 import json
 from typing import Any, Callable, NamedTuple
 
-from jenny.cron.session_turns import CRON_HISTORY_META
+from jenny.session.history_meta import is_synthetic_history_row
 
 # Re-export per gli importatori esterni (media_gateway, ecc.). L'alias ridondante
 # segnala a ruff che è un re-export intenzionale (non un import inutilizzato).
@@ -349,7 +349,9 @@ def _session_user_event(
 ) -> dict[str, Any] | None:
     if message.get("role") != "user":
         return None
-    if message.get(CRON_HISTORY_META) is True:
+    # Una riga che l'utente non ha scritto non e' una bolla da mostrargli, anche
+    # se ne porta il ruolo: v. ``jenny.session.history_meta``.
+    if is_synthetic_history_row(message):
         return None
     content = message.get("content")
     text = content if isinstance(content, str) else ""

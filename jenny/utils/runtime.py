@@ -8,6 +8,11 @@ from typing import Any
 from loguru import logger
 
 from jenny.security.workspace_policy import _safe_expanduser
+from jenny.session.history_meta import (
+    GOAL_CONTINUE_EVENT,
+    INJECTED_EVENT_META,
+    LENGTH_RECOVERY_EVENT,
+)
 from jenny.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
@@ -107,7 +112,15 @@ def looks_like_user_question(content: str | None) -> bool:
 
 
 def build_finalization_retry_message() -> dict[str, str]:
-    """A short no-tools-allowed prompt for final answer recovery."""
+    """A short no-tools-allowed prompt for final answer recovery.
+
+    Senza marcatore ``injected_event``, a differenza di ``build_goal_continue_message``
+    e ``build_length_recovery_message``: questo prompt e quello di budget esaurito
+    finiscono in una *copia* della lista (``_finalization_retry_messages``,
+    ``_budget_exhausted_finalization_messages``) che serve solo alla richiesta e al
+    conteggio token, e non arriva mai alla storia di sessione. Marcarli direbbe il
+    falso su dove vanno a finire.
+    """
     return {"role": "user", "content": FINALIZATION_RETRY_PROMPT}
 
 
@@ -118,12 +131,20 @@ def build_budget_exhausted_finalization_message() -> dict[str, str]:
 
 def build_length_recovery_message() -> dict[str, str]:
     """Prompt the model to continue after hitting output token limit."""
-    return {"role": "user", "content": LENGTH_RECOVERY_PROMPT}
+    return {
+        "role": "user",
+        "content": LENGTH_RECOVERY_PROMPT,
+        INJECTED_EVENT_META: LENGTH_RECOVERY_EVENT,
+    }
 
 
 def build_goal_continue_message(custom: str | None = None) -> dict[str, str]:
     """Prompt the model to continue when a sustained goal is still active."""
-    return {"role": "user", "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT}
+    return {
+        "role": "user",
+        "content": custom or SUSTAINED_GOAL_CONTINUE_PROMPT,
+        INJECTED_EVENT_META: GOAL_CONTINUE_EVENT,
+    }
 
 
 def external_lookup_signature(tool_name: str, arguments: Any) -> str | None:

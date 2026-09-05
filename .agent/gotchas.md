@@ -67,6 +67,36 @@ duration and `_save_turn` appends its block at the end, so an unlocked append ca
 between an `assistant`/`tool_calls` message and its `tool` result — an illegal request for
 the provider.
 
+## Una riga `role: "user"` non è sempre l'utente
+
+Nella storia di sessione quel ruolo è **anche** la forma con cui il sistema parla al modello,
+e tre cose lo usano senza che nessuno abbia digitato niente: un turno di cron, il rientro di
+un subagent iniettato a metà turno (`AgentLoop._drain_pending` normalizza qualunque messaggio
+in coda a `{"role": "user", ...}`) e lo sprone a un sustained goal. Il marcatore che le
+distingue, e l'elenco completo, stanno in `jenny/session/history_meta.py`:
+`is_synthetic_history_row()`.
+
+Chiunque legga la storia per rispondere a una domanda **sull'utente** deve passare da lì. I
+tre lettori di oggi: la bolla da mostrare in chat
+(`webui/transcript.py::_session_user_event`, che il backfill usa quando il transcript di
+display non ha un evento `user` per quel turno), il titolo della conversazione
+(`session/webui_turns.py::_title_inputs`) e «si è fatto vivo dopo che gli abbiamo scritto?»
+(`session/manager.py::last_user_message_ms`, da cui dipende il riarmo dell'heartbeat).
+
+Misurato sul device il 05/09/2026: solo il turno di cron era marcato. Un rientro di subagent
+finito *dentro* il turno che lo aveva lanciato veniva quindi mostrato in chat come una bolla
+dell'utente col prompt integrale del subagent dentro, e contava come «l'utente ha parlato»
+per il riarmo. Lo stesso rientro arrivato *dopo* la fine del turno passava invece da
+`_persist_subagent_followup`, che lo marcava, e non si vedeva: la visibilità dipendeva dal
+tempismo del subagent.
+
+Il marcatore vive **solo** nel JSONL. `SessionManager.get_history` ricostruisce i messaggi per
+il modello con una whitelist di chiavi e i provider ne fanno un'altra prima del filo
+(`LLMProvider._sanitize_request_messages`), quindi è lecito appenderlo a un dict che è anche
+il payload della richiesta in corso. Le due whitelist sono verificate in
+`tests/session/test_history_meta.py`: se una delle due smettesse di filtrare, il campo
+finirebbe su un endpoint che non lo conosce.
+
 ## Skills as Extension Point
 
 Built-in skills live in `jenny/skills/` (markdown + YAML frontmatter format). Agent capabilities that are "know-how" rather than code should be added as skills, not hardcoded into the agent loop. External skills can be published to and installed from ClawHub.
