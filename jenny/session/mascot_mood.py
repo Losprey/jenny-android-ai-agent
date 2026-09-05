@@ -232,4 +232,29 @@ async def classify_mood(
     if response.finish_reason == "error":
         logger.debug("mascot mood: provider returned an error response")
         return NEUTRAL_MOOD, response
-    return parse_mood(response.content), response
+    content = (response.content or "").strip()
+    if not content and response.finish_reason == "length":
+        # Il budget e' finito prima della lettera: un modello che ragiona di
+        # default ha speso i tre token a pensare. Sul telefono il DEBUG non si
+        # vede, e questo e' l'unico sintomo di un sidecar che gira a vuoto.
+        if model not in _WARNED_EMPTY_MODELS:
+            _WARNED_EMPTY_MODELS.add(model)
+            logger.warning(
+                "mascot mood: {!r} spent the whole budget without answering "
+                "(thinking on?); every verdict is neutral until a non-thinking "
+                "model is set via mascotMoodModelPreset",
+                model,
+            )
+        return NEUTRAL_MOOD, response
+    mood = parse_mood(content)
+    logger.info(
+        "mascot mood: {} (model={}, raw={!r}, tokens={})",
+        mood,
+        model,
+        content[:8],
+        (response.usage or {}).get("total_tokens"),
+    )
+    return mood, response
+
+
+_WARNED_EMPTY_MODELS: set[str] = set()

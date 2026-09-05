@@ -238,3 +238,22 @@ async def test_classify_is_neutral_and_silent_on_provider_failure():
     )
     assert mood == "neutral"
     assert response is not None  # la risposta d'errore torna comunque, per la contabilita'
+
+
+async def test_classify_is_neutral_when_the_budget_went_to_thinking():
+    """Contenuto vuoto e ``finish_reason="length"``: il modello ha pensato e basta.
+
+    E' il caso misurato sul telefono con DeepSeek V4 prima della mappa di
+    thinking: neutro, ma con la risposta restituita per la contabilita'.
+    """
+    inputs = mm.MoodInputs(user="ciao", assistant=LONG_REPLY)
+    mood, response = await mm.classify_mood(
+        _provider("", finish_reason="length"), "thinker", inputs, bot_name="J"
+    )
+    assert mood == "neutral"
+    assert response is not None
+    # La seconda volta non deve rifare l'avviso, ma il verdetto e' lo stesso.
+    mood, _ = await mm.classify_mood(
+        _provider(None, finish_reason="length"), "thinker", inputs, bot_name="J"
+    )
+    assert mood == "neutral"
