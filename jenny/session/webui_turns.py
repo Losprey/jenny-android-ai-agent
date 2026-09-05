@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
-
-from loguru import logger
 
 from jenny.bus.events import INTERNAL_CHANNEL, InboundMessage, OutboundMessage
 from jenny.bus.queue import MessageBus
@@ -20,21 +17,12 @@ from jenny.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
-from jenny.providers.base import LLMProvider
-from jenny.session.history_meta import is_synthetic_history_row
 from jenny.session.keys import UNIFIED_SESSION_KEY
 from jenny.session.manager import Session, SessionManager
 from jenny.session.turn_visibility import resolve_turn_visibility
-from jenny.utils.helpers import strip_think, truncate_text
-from jenny.utils.llm_runtime import LLMRuntime
 from jenny.webui.metadata import WEBUI_DEFAULT_CHAT_ID
 
 WEBUI_SESSION_METADATA_KEY = "webui"
-WEBUI_TITLE_METADATA_KEY = "title"
-WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
-TITLE_MAX_CHARS = 60
-TITLE_GENERATION_MAX_TOKENS = 96
-TITLE_GENERATION_REASONING_EFFORT = "none"
 
 # Wall-clock turn start per ``chat_id`` (websocket only). Survives browser refresh while the
 # gateway process stays up; cleared on idle/stop and implicitly dropped on restart.
@@ -72,141 +60,6 @@ def webui_view_target(ctx: RuntimeEventContext) -> tuple[str, str] | None:
     if ctx.channel == INTERNAL_CHANNEL or ctx.session_key != UNIFIED_SESSION_KEY:
         return None
     return ("websocket", WEBUI_DEFAULT_CHAT_ID)
-
-
-def clean_generated_title(raw: str | None) -> str:
-    text = (raw or "").strip()
-    if not text:
-        return ""
-    text = re.sub(r"^\s*(title|标题)\s*[:：]\s*", "", text, flags=re.IGNORECASE)
-    text = text.strip().strip("\"'`“”‘’")
-    text = strip_think(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = text.rstrip("。.!！?？,，;；:")
-    if len(text) > TITLE_MAX_CHARS:
-        text = text[: TITLE_MAX_CHARS - 1].rstrip() + "…"
-    return text
-
-
-def _title_inputs(session: Session) -> tuple[str, str]:
-    user_text = ""
-    assistant_text = ""
-    for message in session.messages:
-        if message.get("_command") is True:
-            continue
-        # Un turno di cron, un rientro di subagent o uno sprone a un goal non
-        # sono di che parla la conversazione: v. ``jenny.session.history_meta``.
-        if is_synthetic_history_row(message):
-            continue
-        role = message.get("role")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        content = strip_think(content)
-        if not content:
-            continue
-        if role == "user" and not user_text:
-            user_text = content.strip()
-        elif role == "assistant" and not assistant_text:
-            assistant_text = content.strip()
-        if user_text and assistant_text:
-            break
-    return user_text, assistant_text
-
-
-async def maybe_generate_webui_title(
-    *,
-    sessions: SessionManager,
-    session_key: str,
-    provider: LLMProvider,
-    model: str,
-) -> bool:
-    """Generate and persist a short title for WebUI-owned sessions only."""
-    session = sessions.get_or_create(session_key)
-    if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
-        return False
-    if session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
-        return False
-    current_title = session.metadata.get(WEBUI_TITLE_METADATA_KEY)
-    if isinstance(current_title, str) and current_title.strip():
-        cleaned_current_title = clean_generated_title(current_title)
-        if cleaned_current_title:
-            if cleaned_current_title != current_title:
-                session.metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
-                sessions.save(session)
-            return False
-        session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
-
-    user_text, assistant_text = _title_inputs(session)
-    if not user_text:
-        return False
-
-    prompt = (
-        "Generate a concise title for this chat.\n"
-        "Rules:\n"
-        "- Use the same language as the user when practical.\n"
-        "- 3 to 8 words.\n"
-        "- No quotes.\n"
-        "- No punctuation at the end.\n"
-        "- Return only the title.\n\n"
-        f"User: {truncate_text(user_text, 1_000)}"
-    )
-    if assistant_text:
-        prompt += f"\nAssistant: {truncate_text(assistant_text, 1_000)}"
-
-    try:
-        response = await provider.chat_with_retry(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "You write short, neutral chat titles. "
-                        "Return only the title text."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            tools=None,
-            model=model,
-            max_tokens=TITLE_GENERATION_MAX_TOKENS,
-            temperature=0.2,
-            reasoning_effort=TITLE_GENERATION_REASONING_EFFORT,
-            retry_mode="standard",
-        )
-    except Exception:
-        logger.debug("Failed to generate webui session title for {}", session_key, exc_info=True)
-        return False
-
-    title = clean_generated_title(response.content)
-    if not title or title.lower().startswith("error"):
-        logger.debug(
-            "WebUI title generation returned no usable title for {} (finish_reason={})",
-            session_key,
-            response.finish_reason,
-        )
-        return False
-    session.metadata[WEBUI_TITLE_METADATA_KEY] = title
-    sessions.save(session)
-    return True
-
-
-async def maybe_generate_webui_title_after_turn(
-    *,
-    channel: str,
-    metadata: dict[str, Any],
-    sessions: SessionManager,
-    session_key: str,
-    provider: LLMProvider,
-    model: str,
-) -> bool:
-    if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
-        return False
-    return await maybe_generate_webui_title(
-        sessions=sessions,
-        session_key=session_key,
-        provider=provider,
-        model=model,
-    )
 
 
 def websocket_turn_wall_started_at(chat_id: str) -> float | None:
@@ -350,7 +203,6 @@ class WebuiTurnCoordinator:
         if msg is None:
             return
         await self.handle_turn_end(msg, latency_ms=event.latency_ms)
-        self._schedule_title_update_from_event(event)
 
     async def _handle_runtime_model_changed(self, event: RuntimeModelChanged) -> None:
         await self.bus.publish_outbound(
@@ -385,37 +237,3 @@ class WebuiTurnCoordinator:
             content="",
             metadata=turn_metadata,
         ))
-
-    def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
-        title_context = event.runtime
-        if (
-            event.context.metadata.get("webui") is not True
-            or title_context is None
-            or not isinstance(title_context, LLMRuntime)
-        ):
-            return
-
-        async def _generate_title_and_notify(
-            title_llm: LLMRuntime = title_context,
-        ) -> None:
-            generated = await maybe_generate_webui_title_after_turn(
-                channel=event.context.channel,
-                metadata=event.context.metadata,
-                sessions=self.sessions,
-                session_key=event.context.session_key,
-                provider=title_llm.provider,
-                model=title_llm.model,
-            )
-            if generated:
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=event.context.channel,
-                    chat_id=event.context.chat_id,
-                    content="",
-                    metadata={
-                        **event.context.metadata,
-                        "_session_updated": True,
-                        "_session_update_scope": "metadata",
-                    },
-                ))
-
-        self.schedule_background(_generate_title_and_notify())
