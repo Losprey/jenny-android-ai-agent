@@ -1076,6 +1076,63 @@ async def test_send_goal_status_running_emits_event_with_started_at() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_mascot_mood_emits_a_dedicated_frame_with_turn_id() -> None:
+    """L'umore della mascotte: un frame suo, mai una bolla, mai nel transcript."""
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "default")
+    channel._transcripts = MagicMock()
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="default",
+        content="",
+        metadata={"_mascot_mood": True, "mascot_mood": "happy", "webui_turn_id": "t-9"},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "mascot_mood", "chat_id": "default", "mood": "happy", "turn_id": "t-9"}
+    channel._transcripts.prepare_and_append.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_mascot_mood_omits_turn_id_and_reaches_only_that_chat() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    ws_default = AsyncMock()
+    ws_other = AsyncMock()
+    channel._attach(ws_default, "default")
+    channel._attach(ws_other, "other")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="default",
+        content="",
+        metadata={"_mascot_mood": True, "mascot_mood": "sad"},
+    ))
+
+    assert json.loads(ws_default.send.await_args.args[0]) == {
+        "event": "mascot_mood", "chat_id": "default", "mood": "sad",
+    }
+    ws_other.send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_mascot_mood_without_subscribers_sends_nothing() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))
+    channel._transcripts = MagicMock()
+    pending = await channel.send(OutboundMessage(
+        channel="websocket", chat_id="default", content="",
+        metadata={"_mascot_mood": True, "mascot_mood": "sad"},
+    ))
+    assert pending == []
+    channel._transcripts.prepare_and_append.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_goal_status_idle_omits_started_at() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus, gateway=_basic_handler(bus))

@@ -20,10 +20,13 @@ from jenny.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
+from jenny.config.schema import Config
+from jenny.providers.base import LLMResponse
 from jenny.session import webui_turns as wt
 from jenny.session.keys import HEARTBEAT_SESSION_KEY
 from jenny.session.manager import Session, SessionManager
 from jenny.session.turn_visibility import silent_turn_metadata
+from jenny.utils.llm_runtime import LLMRuntime
 
 # --- mark_webui_session --------------------------------------------------------
 
@@ -180,6 +183,158 @@ async def test_handle_turn_completed_event_ignores_non_websocket(tmp_path):
     await coordinator._handle_turn_completed_event(event)
     bus.publish_outbound.assert_not_awaited()
     assert scheduled == []
+
+
+# --- il sidecar dell'umore della mascotte -------------------------------------------
+
+_REPLY = "Fatto: ho spostato la riunione alle 16 e avvisato tutti. Spero vada bene!"
+
+
+def _mood_coordinator(tmp_path, *, config: Config | None = None, letter: str = "A"):
+    coordinator, bus, scheduled = _coordinator(tmp_path)
+    coordinator.config_loader = lambda: config if config is not None else Config()
+    session = coordinator.sessions.get_or_create("websocket:c1")
+    session.add_message("user", "sposta la riunione")
+    session.add_message("assistant", _REPLY)
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content=letter, usage={"total_tokens": 5})
+    )
+    ctx = RuntimeEventContext(
+        channel="websocket",
+        chat_id="c1",
+        session_key="websocket:c1",
+        metadata={"webui": True, "webui_turn_id": "t-1"},
+    )
+    event = TurnCompleted(
+        context=ctx, latency_ms=10, runtime=LLMRuntime(provider=provider, model="turn-model")
+    )
+    return coordinator, bus, scheduled, provider, event
+
+
+async def _run_scheduled(scheduled: list) -> None:
+    for coro in scheduled:
+        await coro
+
+
+async def test_turn_completed_schedules_the_mood_and_publishes_the_frame(tmp_path, monkeypatch):
+    recorded: list = []
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage",
+        lambda response, **kw: recorded.append((response, kw)),
+    )
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, letter="A")
+
+    await coordinator._handle_turn_completed_event(event)
+
+    # Il gestore pubblica solo il ``turn_end``: il resto e' nel background.
+    assert bus.publish_outbound.await_count == 1
+    assert len(scheduled) == 1
+    await _run_scheduled(scheduled)
+
+    provider.chat_with_retry.assert_awaited_once()
+    assert provider.chat_with_retry.await_args.kwargs["model"] == "turn-model"
+    frame = bus.publish_outbound.await_args_list[-1][0][0]
+    assert frame.channel == "websocket" and frame.chat_id == "c1" and frame.content == ""
+    assert frame.metadata["_mascot_mood"] is True
+    assert frame.metadata["mascot_mood"] == "happy"
+    assert frame.metadata["webui_turn_id"] == "t-1"
+    # Contato, nel suo bucket: il titolo che questo sostituisce non lo era.
+    assert len(recorded) == 1
+    assert recorded[0][1]["source"] == "mascot"
+
+
+async def test_neutral_mood_publishes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
+    )
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, letter="E")
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_awaited_once()
+    assert bus.publish_outbound.await_count == 1  # solo il turn_end
+
+
+async def test_provider_failure_leaves_the_mascot_idle(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+    provider.chat_with_retry = AsyncMock(side_effect=RuntimeError("boom"))
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_mood_disabled_in_config_costs_no_request(tmp_path):
+    config = Config.model_validate({"agents": {"defaults": {"mascotMood": False}}})
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=config)
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_mood_uses_the_configured_preset_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
+    )
+    config = Config.model_validate({
+        "agents": {"defaults": {"mascotMoodModelPreset": "cheap"}},
+        "modelPresets": {"cheap": {"model": "tiny-1"}},
+    })
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=config)
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    assert provider.chat_with_retry.await_args.kwargs["model"] == "tiny-1"
+
+
+async def test_command_turn_has_no_runtime_and_no_mood(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+    event = TurnCompleted(context=event.context, latency_ms=1, runtime=None)
+    await coordinator._handle_turn_completed_event(event)
+    assert scheduled == []
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_turn_ended_in_error_costs_no_request(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+    coordinator.sessions.get_or_create("websocket:c1").add_message("user", "riprova")
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_unreadable_config_skips_quietly(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+
+    def _boom():
+        raise OSError("no config")
+
+    coordinator.config_loader = _boom
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+
+
+async def test_telegram_turn_mood_lands_on_the_webui_view(tmp_path, monkeypatch):
+    """Un turno da Telegram e' la stessa conversazione: la mascotte reagisce nella WebUI."""
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
+    )
+    coordinator, bus, scheduled = _coordinator(tmp_path)
+    coordinator.config_loader = Config
+    session = coordinator.sessions.get_or_create("unified:default")
+    session.add_message("user", "sposta la riunione")
+    session.add_message("assistant", _REPLY)
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="D"))
+    event = TurnCompleted(
+        context=_telegram_ctx(), latency_ms=1, runtime=LLMRuntime(provider=provider, model="m")
+    )
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    frame = bus.publish_outbound.await_args_list[-1][0][0]
+    assert (frame.channel, frame.chat_id) == ("websocket", "default")
+    assert frame.metadata["mascot_mood"] == "surprised"
 
 
 # --- proiezione dei turni esterni sulla vista WebUI --------------------------------

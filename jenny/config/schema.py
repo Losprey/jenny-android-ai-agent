@@ -395,6 +395,20 @@ class AgentDefaults(Base):
         default=None,
         validation_alias=AliasChoices("modelPreset", "model_preset"),
     )
+    # L'umore della mascotte: una richiesta piccola al modello dopo ogni turno
+    # WebUI (``jenny/session/mascot_mood.py``). Letti al momento della chiamata,
+    # quindi un cambio vale dal turno dopo senza riavvio. Il preset presta solo
+    # il ``model``: il provider resta quello del turno.
+    mascot_mood: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("mascotMood", "mascot_mood"),
+        serialization_alias="mascotMood",
+    )
+    mascot_mood_model_preset: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("mascotMoodModelPreset", "mascot_mood_model_preset"),
+        serialization_alias="mascotMoodModelPreset",
+    )
 
     @model_validator(mode="before")
     @classmethod

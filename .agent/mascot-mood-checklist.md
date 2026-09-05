@@ -7,7 +7,9 @@ telefono per i passi 5 e 7), non quando è scritto.
 Ramo: `feat/mascot-mood`, aperto il 05/09/2026 da `main` (a9349ac, con
 `fix/synthetic-user-rows` già mergiato come PR #31). **Passi 0 e 1 girati il
 05/09/2026**: 9.145 test verdi su 3.14, i tre file toccati verdi anche su 3.11,
-lint e pyright puliti.
+lint e pyright puliti. **Passo 2 girato il 05/09/2026**: 9.178 test su 3.14,
+366 su 3.11 nelle aree toccate; le due righe di `configuration.md` (4.2) sono
+entrate qui perché la pagina promette ogni chiave.
 
 Comandi di verifica per ogni passo (da `AGENTS.md`, con la correzione locale:
 `python3 -m pytest`, non `pytest`):
@@ -47,26 +49,28 @@ un force-push.
 
 ## Passo 2 — il sidecar *(un commit)*
 
-- [ ] **2.1** `jenny/session/mascot_mood.py`: `MOODS`, `mood_inputs`,
+- [x] **2.1** `jenny/session/mascot_mood.py`: `MOODS`, `mood_inputs`,
       `build_mood_request`, `parse_mood`, `classify_mood`, `resolve_mood_model`
-- [ ] **2.2** `config/schema.py`: `mascot_mood` (`mascotMood`, default `True`),
+- [x] **2.2** `config/schema.py`: `mascot_mood` (`mascotMood`, default `True`),
       `mascot_mood_model_preset` (`mascotMoodModelPreset`, default `None`)
-- [ ] **2.3** `webui_turns.py`: `_schedule_mood_from_event` dopo `handle_turn_end`;
+- [x] **2.3** `webui_turns.py`: `_schedule_mood_from_event` dopo `handle_turn_end`;
       frame solo se `mood != "neutral"`; uso registrato con `source="mascot"`
-- [ ] **2.4** `ws_sender.py`: early-return `_mascot_mood` → `send_mascot_mood`;
+- [x] **2.4** `ws_sender.py`: early-return `_mascot_mood` → `send_mascot_mood`;
       "no active subscribers" a `debug`
-- [ ] **2.5** `token_usage.py`: `"mascot"` in `_SOURCE_KEYS`
-- [ ] **2.6** Incognita chiusa: il pannello Uso token enumera o itera i bucket?
-      → i18n toccata sì/no (scriverlo nel piano, D12)
-- [ ] **2.7** Test: `tests/session/test_mascot_mood.py`
-- [ ] **2.8** Test: coordinatore in `tests/session/test_webui_turns.py`
+- [x] **2.5** `token_usage.py`: `"mascot"` in `_SOURCE_KEYS`
+- [x] **2.6** Incognita chiusa: il pannello mostra **solo totali**, nessun bucket
+      arriva al client → i18n non toccata (scritto nel piano, D12)
+- [x] **2.7** Test: `tests/session/test_mascot_mood.py`
+- [x] **2.8** Test: coordinatore in `tests/session/test_webui_turns.py`
       (schedula; runtime del turno; niente frame su `neutral`; niente frame su
-      errore provider; niente schedule con `mascot_mood=false`; niente schedule
-      quando l'ultima riga è user; niente schedule con `runtime=None`, cioè un
-      turno-comando)
-- [ ] **2.9** Test: frame in `tests/channels/` (forma, solo iscritti, non persistito)
-- [ ] **2.10** Test: `tests/config/` (alias camelCase e default)
-- [ ] **2.11** Verifica completa verde, **anche con il venv 3.11** (il telefono è
+      errore provider; niente **richiesta** con `mascot_mood=false` — il flag si
+      legge nel task, non nel gestore; niente richiesta quando l'ultima riga è
+      user; niente schedule con `runtime=None`, cioè un turno-comando; turno
+      Telegram → frame sulla vista `websocket:default`; config illeggibile →
+      silenzio)
+- [x] **2.9** Test: frame in `tests/channels/` (forma, solo iscritti, non persistito)
+- [x] **2.10** Test: `tests/config/` (alias camelCase e default)
+- [x] **2.11** Verifica completa verde, **anche con il venv 3.11** (il telefono è
       3.11; `cat /tmp/py311/pyvenv.cfg` prima di fidarsi); commit `-s`
 
 ## Passo 3 — il client *(un commit)*
@@ -89,7 +93,7 @@ un force-push.
 ## Passo 4 — documentazione *(stesso PR)*
 
 - [ ] **4.1** `docs/reference/websocket.md`: frame `mascot_mood`
-- [ ] **4.2** `docs/reference/configuration.md`: i due campi
+- [x] **4.2** `docs/reference/configuration.md`: i due campi (fatto col passo 2)
 - [ ] **4.3** `docs/using/themes-mascot.md`: sezione *Espressioni*
 - [ ] **4.4** `android/image_source/README.md`: pose d'umore e mappa provvisoria
 - [ ] **4.5** Deriva dei default corretta in `themes-mascot.md` e `settings.md`:

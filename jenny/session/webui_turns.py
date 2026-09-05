@@ -5,7 +5,9 @@ from __future__ import annotations
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from jenny.bus.events import INTERNAL_CHANNEL, InboundMessage, OutboundMessage
 from jenny.bus.queue import MessageBus
@@ -17,10 +19,22 @@ from jenny.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
+from jenny.config.loader import load_config
 from jenny.session.keys import UNIFIED_SESSION_KEY
 from jenny.session.manager import Session, SessionManager
+from jenny.session.mascot_mood import (
+    MOOD_TOKEN_USAGE_SOURCE,
+    NEUTRAL_MOOD,
+    classify_mood,
+    mood_inputs,
+    resolve_mood_model,
+)
 from jenny.session.turn_visibility import resolve_turn_visibility
+from jenny.utils.llm_runtime import LLMRuntime
 from jenny.webui.metadata import WEBUI_DEFAULT_CHAT_ID
+
+if TYPE_CHECKING:
+    from jenny.config.schema import Config
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 
@@ -108,6 +122,10 @@ class WebuiTurnCoordinator:
     bus: MessageBus
     sessions: SessionManager
     schedule_background: Callable[[Awaitable[None]], None]
+    # Il config si legge **al momento della chiamata**, non alla costruzione:
+    # ``mascotMood`` e il suo preset valgono dal turno dopo senza riavvio. In
+    # test si inietta un lettore che non tocca il disco.
+    config_loader: Callable[[], Config] = load_config
 
     def subscribe(self, runtime_events: RuntimeEventBus) -> Callable[[], None]:
         """Subscribe this coordinator to runtime events."""
@@ -203,6 +221,63 @@ class WebuiTurnCoordinator:
         if msg is None:
             return
         await self.handle_turn_end(msg, latency_ms=event.latency_ms)
+        self._schedule_mood_from_event(event, msg)
+
+    def _schedule_mood_from_event(self, event: TurnCompleted, msg: InboundMessage) -> None:
+        """Il sidecar dell'umore della mascotte, in background, dopo il ``turn_end``.
+
+        ``runtime`` e' la foto di provider/modello scattata da ``_state_build``: un
+        turno-comando non la scatta (``None``) e non ha un umore. Tutto il resto —
+        il flag di config, l'ultimo scambio, la richiesta, il frame — sta nel task
+        in background, cosi' il gestore dell'evento resta a costo zero e un
+        errore qualunque lascia la mascotte ``idle``, com'era prima.
+        """
+        runtime = event.runtime
+        if not isinstance(runtime, LLMRuntime):
+            return
+
+        async def _classify_and_notify(turtime: LLMRuntime = runtime) -> None:
+            try:
+                config = self.config_loader()
+            except Exception:
+                logger.debug("mascot mood: config unreadable, skipping", exc_info=True)
+                return
+            defaults = config.agents.defaults
+            if not defaults.mascot_mood:
+                return
+            session = self.sessions.get_or_create(event.context.session_key)
+            inputs = mood_inputs(session)
+            if inputs is None:
+                return
+            model = resolve_mood_model(config, turtime.model)
+            mood, response = await classify_mood(
+                turtime.provider, model, inputs, bot_name=defaults.bot_name
+            )
+            if response is not None:
+                # Import qui e non in testa: ``jenny.agent`` carica il loop intero
+                # e ``jenny.session`` deve reggere da primo import
+                # (``tests/session/test_cold_imports.py``).
+                from jenny.agent.token_usage import record_response_token_usage
+
+                record_response_token_usage(
+                    response,
+                    source=MOOD_TOKEN_USAGE_SOURCE,
+                    timezone_name=defaults.timezone or None,
+                )
+            if mood == NEUTRAL_MOOD:
+                return
+            await self.bus.publish_outbound(OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="",
+                metadata={
+                    **dict(event.context.metadata or {}),
+                    "_mascot_mood": True,
+                    "mascot_mood": mood,
+                },
+            ))
+
+        self.schedule_background(_classify_and_notify())
 
     async def _handle_runtime_model_changed(self, event: RuntimeModelChanged) -> None:
         await self.bus.publish_outbound(

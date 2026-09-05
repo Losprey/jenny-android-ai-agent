@@ -165,7 +165,9 @@ prossimo turno lo sostituisce). Il `turn_id` è quello del turno classificato,
 preso da `ctx.metadata[WEBUI_TURN_METADATA_KEY]`: senza id il client lo accetta
 comunque, come fa per gli altri frame (regola di `_trackedTurnMatches`).
 
-**D9 — Il modello.** Due campi in `AgentDefaults`:
+**D9 — Il modello.** Due campi in `AgentDefaults` (i preset, invece, stanno su
+`Config.model_presets`, non sotto `agents.defaults`: `resolve_mood_model` prende
+il `Config` intero):
 `mascot_mood: bool = True` (alias `mascotMood`) e
 `mascot_mood_model_preset: str | None = None` (alias `mascotMoodModelPreset`).
 Con il preset a `None` si usa `event.runtime` (provider e modello del turno);
@@ -176,7 +178,11 @@ l'umore non deve essere il primo a provarci. Un preset inesistente si logga a
 riga e senza è una feature che non esiste; chi non la vuole ha il flag e, dal
 passo 6, l'interruttore in Impostazioni. La lettura va fatta al momento della
 chiamata dal config caricato (come `worker_settings_payload`), così un cambio
-vale dal turno dopo senza riavvio.
+vale dal turno dopo senza riavvio. *Com'è uscito (05/09):* il coordinatore ha un
+campo `config_loader` con default `load_config`, letto **dentro** il task in
+background — il gestore dell'evento resta a costo zero e in test si inietta un
+lettore che non tocca il disco. Il flag spento quindi non evita la schedulazione
+ma la richiesta: è la richiesta che costa.
 
 **D10 — Livello 0: le reazioni che non costano niente, lato client.** Ortogonali
 al sidecar e sempre attive, anche a `mascotMood=false`:
@@ -207,7 +213,12 @@ statiche.
 sì, con `record_response_token_usage(response, source="mascot")` e `"mascot"`
 aggiunto a `_SOURCE_KEYS` in `token_usage.py`. Se il pannello Uso token della
 WebUI enumera i bucket da una lista fissa, si aggiunge l'etichetta i18n
-(`it`/`en`); se li itera dal payload, basta il bucket. **Da verificare al passo 2.**
+(`it`/`en`); se li itera dal payload, basta il bucket. ~~Da verificare al passo
+2.~~ **Verificato il 05/09/2026: nessuna delle due.** `token_usage_payload`
+espone solo totali (token, richieste, giorni attivi, streak): i bucket per
+sorgente stanno nel file di stato e non arrivano al client. Il bucket `mascot`
+basta, l'i18n non si tocca; se un giorno il pannello mostrerà le sorgenti, il
+dato c'è già.
 
 **D13 — L'arte arriva per ultima, con una mappa provvisoria prima.** Per provare
 il meccanismo sul telefono senza disegnare: `happy → hello1`, `surprised → talk1a`
@@ -331,8 +342,8 @@ di un'altra sessione): non si parte da lì e non si tocca finché non è mergiat
 
 ## Incognite aperte
 
-- **Il pannello Uso token enumera i bucket o li itera?** Decide se D12 tocca
-  l'i18n. Si chiude al passo 2.
+- ~~Il pannello Uso token enumera i bucket o li itera?~~ Nessuna delle due: mostra
+  solo totali (chiuso il 05/09/2026, v. D12).
 - **Quanto spesso il modello risponde `E`?** Se sopra l'80% dei turni, la
   soglia di D4 può salire (meno chiamate) o il prompt va rivisto; se sotto il
   20%, la mascotte è troppo espressiva e il roleplay stanca. Si misura al passo 5
