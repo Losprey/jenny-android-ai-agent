@@ -133,7 +133,13 @@ insieme chiuso; si legge il primo carattere `A-E` della risposta, tutto il resto
 provider può spendere il primo token in uno spazio o in un a-capo; con 3 la
 lettera arriva e la divagazione no. `temperature=0`, `reasoning_effort="none"`
 (sui modelli Anthropic disattiva il thinking, `anthropic_provider.py:214`; sugli
-altri è ignorato o equivalente), `retry_mode="standard"` come il titolo — è una
+OpenAI-compatibili spegne il thinking **solo per i modelli con uno stile mappato**
+in `openai_compat_helpers.py` — ~~sugli altri è ignorato o equivalente~~ **no:
+misurato il 05/09 sul telefono con `deepseek-v4-flash`, che pensa di default e
+non era mappato: due richieste, 3 token di uscita ciascuna, contenuto vuoto,
+`finish_reason=length`, verdetto neutro sempre, e l'unico testimone era il
+bucket dei token. Ora DeepSeek V4 è mappato su `thinking_type` e il sidecar
+avverte una volta per modello quando il budget finisce senza lettera), `retry_mode="standard"` come il titolo — è una
 chiamata piccola, un retry non fa danno, e la retry policy è del provider.
 
 **D6 — Il prompt è in prima persona, ed è qui che vive il roleplay.** Non "classifica
@@ -330,7 +336,13 @@ di un'altra sessione): non si parte da lì e non si tocca finché non è mergiat
   no, via la riga e il "three mascot options" diventa il numero giusto.
 - **Regola del sito**: nessun file di `docs/` si sposta o si rinomina.
 
-**Passo 5 — Sul telefono** *(nessun codice)*
+**Passo 5 — Sul telefono** *(nessun codice)* — **girato il 05/09/2026**, v. le
+misure in D5 e nelle incognite; screenshot in sessione. I due turni di prova
+(uno positivo, uno negativo) hanno dato entrambi `C` = preoccupata, e a leggere
+le risposte è giusto: Jenny si era accorta di essere messa alla prova e lo
+diceva. La faccia sul telefono è cambiata (posa provvisoria `think`). Restano
+non provati sul device: l'errore → triste, il turno da Telegram, la quota di
+neutri su una giornata.
 - Build e installazione dell'APK; poi con il client WS (`adb forward` + python
   `websockets`) un turno con risposta chiaramente positiva e uno chiaramente
   negativo: leggere il frame `mascot_mood`, il suo ritardo rispetto a `turn_end`
@@ -361,10 +373,11 @@ di un'altra sessione): non si parte da lì e non si tocca finché non è mergiat
   soglia di D4 può salire (meno chiamate) o il prompt va rivisto; se sotto il
   20%, la mascotte è troppo espressiva e il roleplay stanca. Si misura al passo 5
   contando i frame su una giornata d'uso.
-- **La latenza del sidecar su un modello di ragionamento** con
-  `reasoning_effort="none"` ignorato dal provider: se supera i 5 s l'umore arriva
-  quando lei è già tornata `idle` da un pezzo e la reazione sembra un tic. Si
-  misura al passo 5; il rimedio è il preset (D9).
+- ~~La latenza del sidecar su un modello di ragionamento~~ Misurata il
+  05/09/2026 su `deepseek-v4-flash` con il thinking spento: **0,50 s e 0,65 s**
+  dopo il `turn_end`, ~200–250 token in ingresso e 1–3 in uscita per richiesta
+  (bucket `mascot`: 4 richieste, 904 token in ingresso, 8 in uscita). Il rischio
+  vero non era la latenza ma il thinking acceso, v. D5.
 - **Un'installazione senza `bot_name` personalizzato** dice "Jenny" due volte nel
   prompt: cosmetico, si sistema nel template.
 

@@ -9,7 +9,10 @@ Ramo: `feat/mascot-mood`, aperto il 05/09/2026 da `main` (a9349ac, con
 05/09/2026**: 9.145 test verdi su 3.14, i tre file toccati verdi anche su 3.11,
 lint e pyright puliti. **Passo 2 girato il 05/09/2026**: 9.178 test su 3.14,
 366 su 3.11 nelle aree toccate; le due righe di `configuration.md` (4.2) sono
-entrate qui perché la pagina promette ogni chiave. **Passi 3 e 4 girati il 05/09/2026**:
+entrate qui perché la pagina promette ogni chiave. **Passo 5 girato il
+05/09/2026** (5.1–5.4): la prima prova ha trovato il thinking di DeepSeek acceso
+nei 3 token, corretto in `e1c2e0e`; la seconda ha dato frame a 0,5–0,65 s e la
+faccia sul telefono. **Passi 3 e 4 girati il 05/09/2026**:
 9.190 test su 3.14, 276 su 3.11 (client, sessione); `MOOD_ART` provvisoria sulle
 pose esistenti per decisione dell'utente — niente arte prevista, il passo 7 resta
 per dopo, fuori da questo PR.
@@ -108,12 +111,13 @@ un force-push.
 
 ## Passo 5 — sul telefono *(nessun codice; misure nel piano)*
 
-- [ ] **5.1** APK installato dal ramo (working tree pulito: Chaquopy impacchetta
-      l'albero, non HEAD)
-- [ ] **5.2** Con il client WS: frame `mascot_mood` letto su un turno positivo e su
-      uno negativo; ritardo da `turn_end` scritto nel piano (atteso < 2 s)
-- [ ] **5.3** Bucket `mascot` presente nel payload uso token dopo i turni
-- [ ] **5.4** Screenshot della faccia entro i 12 s
+- [x] **5.1** APK installato dal ramo (working tree pulito: Chaquopy impacchetta
+      l'albero, non HEAD) — due volte: `c7bc337` (frame mai arrivato) e `e1c2e0e`
+- [x] **5.2** Con il client WS: frame `mascot_mood` letto su un turno positivo e su
+      uno negativo; ritardo da `turn_end` **0,50 s / 0,65 s**, `turn_id` combacia
+      (prima prova: nessun frame — DeepSeek pensava nei 3 token, v. piano D5)
+- [x] **5.3** Bucket `mascot` nel file di stato: 4 richieste, 904 in / 8 out
+- [x] **5.4** Screenshot della faccia a 0 e 1,5 s dal frame: posa `think` (= `worried` provvisoria)
 - [ ] **5.5** Dopo un `error`: faccia `sad`, nessun frame `mascot_mood`
 - [ ] **5.6** Un turno da Telegram fa reagire la mascotte nella WebUI
 - [ ] **5.7** Una giornata d'uso: quota di `neutral` sul totale scritta nel piano
