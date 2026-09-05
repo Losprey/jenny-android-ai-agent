@@ -54,8 +54,14 @@ from jenny.cron.types import (
     CronTaskCheckState,
 )
 from jenny.runtime.cron_dispatch import CronDispatcher
+from jenny.session.history_meta import (
+    GOAL_CONTINUE_EVENT,
+    INJECTED_EVENT_META,
+    SUBAGENT_RESULT_EVENT,
+)
 from jenny.session.keys import UNIFIED_SESSION_KEY, session_key_for_channel
 from jenny.session.manager import Session, last_user_message_ms
+from jenny.utils.runtime import SUSTAINED_GOAL_CONTINUE_PROMPT
 
 _WATERBOT = (
     "- Ogni ciclo, controlla l'umidità delle piante e avvisami solo se una è sotto il 15%."
@@ -502,6 +508,45 @@ class TestTheLastUserMessageReader:
                 "content": "promemoria",
                 "timestamp": reminder.isoformat(),
                 CRON_HISTORY_META: True,
+            },
+        ]
+
+        assert last_user_message_ms(session) == int(human.timestamp() * 1000)
+
+    def test_a_subagent_announce_is_skipped_and_the_real_one_behind_it_wins(self) -> None:
+        """Un subagent che rientra non è l'utente che si presenta.
+
+        Misurato sul device il 05/09/2026: l'annuncio iniettato a metà turno si
+        persiste con ``role: "user"`` come il turno di cron qui sopra, e senza
+        marcatore riarmava ogni avviso già mandato — di notte, davanti a uno
+        schermo spento.
+        """
+        session = Session(key=UNIFIED_SESSION_KEY)
+        human = datetime(2026, 8, 16, 9, 0, 0)
+        announce = human + timedelta(hours=3)
+        session.messages = [
+            {"role": "user", "content": "a", "timestamp": human.isoformat()},
+            {
+                "role": "user",
+                "content": "[Subagent 'backup latest hps' completed successfully]…",
+                "timestamp": announce.isoformat(),
+                INJECTED_EVENT_META: SUBAGENT_RESULT_EVENT,
+            },
+        ]
+
+        assert last_user_message_ms(session) == int(human.timestamp() * 1000)
+
+    def test_a_goal_continuation_is_skipped_too(self) -> None:
+        session = Session(key=UNIFIED_SESSION_KEY)
+        human = datetime(2026, 8, 16, 9, 0, 0)
+        spur = human + timedelta(hours=3)
+        session.messages = [
+            {"role": "user", "content": "a", "timestamp": human.isoformat()},
+            {
+                "role": "user",
+                "content": SUSTAINED_GOAL_CONTINUE_PROMPT,
+                "timestamp": spur.isoformat(),
+                INJECTED_EVENT_META: GOAL_CONTINUE_EVENT,
             },
         ]
 

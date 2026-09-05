@@ -78,6 +78,10 @@ from jenny.session.goal_state import (
     runner_wall_llm_timeout_s,
     sustained_goal_active,
 )
+from jenny.session.history_meta import (
+    INJECTED_EVENT_META,
+    SUBAGENT_RESULT_EVENT,
+)
 from jenny.session.keys import (
     PROJECT_SESSION_PREFIX,
     is_project_session_key,
@@ -1356,7 +1360,24 @@ class AgentLoop(StateHandlersMixin, ProviderPresetMixin, TurnPersistenceMixin, L
                     content, media = self._prepare_message_media(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
-                return {"role": "user", "content": user_content}
+                message: dict[str, Any] = {"role": "user", "content": user_content}
+                # Il ruolo `user` qui è la forma che il modello deve vedere, non
+                # un fatto sull'utente: un rientro di subagent entra da questa
+                # coda esattamente come un messaggio digitato. La metadata è
+                # l'unico posto in cui i due si distinguono ancora, e senza
+                # riportarla il dict finisce in storia indistinguibile da una
+                # riga scritta davvero (v. `jenny.session.history_meta`).
+                injected_event = (
+                    pending_msg.metadata.get(INJECTED_EVENT_META)
+                    if isinstance(pending_msg.metadata, dict)
+                    else None
+                )
+                if injected_event == SUBAGENT_RESULT_EVENT:
+                    message[INJECTED_EVENT_META] = SUBAGENT_RESULT_EVENT
+                    task_id = pending_msg.metadata.get("subagent_task_id")
+                    if task_id:
+                        message["subagent_task_id"] = task_id
+                return message
 
             items: list[dict[str, Any]] = []
             while len(items) < limit:

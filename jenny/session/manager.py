@@ -10,6 +10,7 @@ from typing import Any
 
 from loguru import logger
 
+from jenny.session.history_meta import is_synthetic_history_row
 from jenny.utils.helpers import (
     channel_delivery_aware_user_start,
     ensure_dir,
@@ -318,10 +319,13 @@ def last_user_message_ms(session: Session | None) -> int | None:
       compreso il momento in cui scrive l'avviso stesso che si sta cercando di
       ricordare (``loop.py``, ``record_channel_delivery``). Serve una riga
       ``role == "user"``, non l'ultima attività della sessione.
-    - **non** i turni di cron. Un job ``reminder`` si persiste nella storia
-      esattamente come un messaggio dell'utente — stessa riga, stesso ruolo
-      (``cron_history_overrides``) — e contarlo vorrebbe dire che un promemoria
-      delle 09:00 "risponde" ogni mattina al posto di chi dorme.
+    - **non** le righe che l'utente non ha scritto pur portandone il ruolo. Un
+      job ``reminder`` si persiste nella storia esattamente come un messaggio
+      dell'utente — stessa riga, stesso ruolo (``cron_history_overrides``) — e
+      contarlo vorrebbe dire che un promemoria delle 09:00 "risponde" ogni
+      mattina al posto di chi dorme. Lo stesso vale per il rientro di un
+      subagent e per lo sprone a un sustained goal: l'elenco completo, e il
+      perché, stanno in ``jenny.session.history_meta``.
     - **non** ``timestamp`` presi per buoni: la riga potrebbe non averlo, o
       averlo illeggibile. Si scorre indietro fino alla prima utilizzabile, che
       è la direzione sicura — un timbro più vecchio riarma di meno, mai di più.
@@ -332,25 +336,8 @@ def last_user_message_ms(session: Session | None) -> int | None:
     """
     if session is None:
         return None
-    # Import dentro la funzione, e non in testa al modulo, perché altrimenti è un
-    # ciclo: ``jenny.cron.session_turns`` importa ``jenny.session.keys``, che
-    # esegue ``jenny/session/__init__.py``, che carica questo modulo, che tornerebbe
-    # su ``session_turns`` ancora a metà inizializzazione. Misurato il 2026-08-17: a
-    # freddo ``import jenny.cron.session_turns`` falliva, e la suite era verde perché
-    # una raccolta completa carica ``jenny.session`` per prima.
-    #
-    # L'alternativa era rendere pigro ``jenny/session/__init__.py``, e costa più di
-    # quanto sembri: una ``__getattr__`` di modulo fa diventare ``Any`` ogni
-    # attributo sconosciuto del package — misurato, ``jenny.session.SessionManagr``
-    # smette di essere un errore — e ``jenny/session`` sta nel sottoinsieme
-    # **bloccante** di pyright. Si perderebbe il controllo dei nomi su tutto il
-    # package per chiudere un ciclo che si chiude qui in una riga. La stringa resta
-    # importata e non ricopiata: è la chiave con cui un turno di cron si marca nella
-    # storia, e questa funzione deve saltarla.
-    from jenny.cron.session_turns import CRON_HISTORY_META
-
     for message in reversed(session.messages):
-        if message.get("role") != "user" or message.get(CRON_HISTORY_META):
+        if message.get("role") != "user" or is_synthetic_history_row(message):
             continue
         raw = message.get("timestamp")
         if not isinstance(raw, str):

@@ -1172,3 +1172,86 @@ def test_two_boundaries_in_a_row_are_one_page_break(tmp_path, monkeypatch) -> No
     assert second is not None
     assert _message_contents(second) == _numbered_turn_texts(1, 2)
     assert second["page"]["has_more_before"] is False
+
+
+_SUBAGENT_ANNOUNCE = (
+    "[Subagent 'backup latest hps' completed successfully]\n\n"
+    "Task: Fai una singola chiamata al tool MCP `latest` sull'hub…\n\n"
+    "Result:\nlocale ok, remoto ok\n\n"
+    "Summarize this naturally for the user."
+)
+
+
+def test_cron_turn_does_not_backfill_a_subagent_announce_as_a_user_bubble(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Il rientro di un subagent non è una bolla dell'utente.
+
+    Misurato sul device il 05/09/2026: il turno del cron ``backup-daily-recap``
+    non ha evento ``user`` nel transcript di display (il trigger non ci passa),
+    quindi il backfill va a cercarne uno in sessione. Scartava il trigger per
+    ``_cron_turn`` e trovava subito dopo l'annuncio del subagent — iniettato a
+    metà turno con ``role: "user"`` e nessun marcatore — e lo mostrava in chat
+    con dentro il prompt integrale del subagent.
+    """
+    monkeypatch.setattr("jenny.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:cron-announce"
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "cron-announce", "text": "buongiorno papi, backup ok"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "cron-announce"})
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {
+                "role": "user",
+                "content": "Scheduled cron job triggered: backup-daily-recap",
+                "_cron_turn": True,
+            },
+            {"role": "assistant", "content": "delego la lettura a un subagent"},
+            {
+                "role": "user",
+                "content": _SUBAGENT_ANNOUNCE,
+                "injected_event": "subagent_result",
+                "subagent_task_id": "ff0941f9",
+            },
+            {"role": "assistant", "content": "buongiorno papi, backup ok"},
+        ],
+    )
+
+    assert out is not None
+    assert [(m["role"], m["content"]) for m in out["messages"]] == [
+        ("assistant", "buongiorno papi, backup ok"),
+    ]
+
+
+def test_cron_turn_still_backfills_a_real_user_message(tmp_path, monkeypatch) -> None:
+    """Controllo positivo: senza il marcatore il backfill fa ancora il suo lavoro.
+
+    Tiene il test qui sopra onesto — deve fallire perché l'annuncio è *marcato*,
+    non perché il backfill ha smesso di funzionare.
+    """
+    monkeypatch.setattr("jenny.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:real-user"
+    append_transcript_object(
+        key,
+        {"event": "message", "chat_id": "real-user", "text": "buongiorno papi, backup ok"},
+    )
+    append_transcript_object(key, {"event": "turn_end", "chat_id": "real-user"})
+
+    out = build_webui_thread_response(
+        key,
+        session_messages=[
+            {"role": "user", "content": "com'è andato il backup?"},
+            {"role": "assistant", "content": "buongiorno papi, backup ok"},
+        ],
+    )
+
+    assert out is not None
+    assert [(m["role"], m["content"]) for m in out["messages"]] == [
+        ("user", "com'è andato il backup?"),
+        ("assistant", "buongiorno papi, backup ok"),
+    ]

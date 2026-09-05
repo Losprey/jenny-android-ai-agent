@@ -20,8 +20,8 @@ from jenny.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
-from jenny.cron.session_turns import CRON_HISTORY_META
 from jenny.providers.base import LLMProvider
+from jenny.session.history_meta import is_synthetic_history_row
 from jenny.session.keys import UNIFIED_SESSION_KEY
 from jenny.session.manager import Session, SessionManager
 from jenny.session.turn_visibility import resolve_turn_visibility
@@ -94,7 +94,9 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     for message in session.messages:
         if message.get("_command") is True:
             continue
-        if message.get(CRON_HISTORY_META) is True:
+        # Un turno di cron, un rientro di subagent o uno sprone a un goal non
+        # sono di che parla la conversazione: v. ``jenny.session.history_meta``.
+        if is_synthetic_history_row(message):
             continue
         role = message.get("role")
         content = message.get("content")

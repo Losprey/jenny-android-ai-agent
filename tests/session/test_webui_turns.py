@@ -24,6 +24,11 @@ from jenny.bus.runtime_events import (
 from jenny.cron.session_turns import CRON_HISTORY_META
 from jenny.providers.base import LLMResponse
 from jenny.session import webui_turns as wt
+from jenny.session.history_meta import (
+    GOAL_CONTINUE_EVENT,
+    INJECTED_EVENT_META,
+    SUBAGENT_RESULT_EVENT,
+)
 from jenny.session.keys import HEARTBEAT_SESSION_KEY
 from jenny.session.manager import Session, SessionManager
 from jenny.session.turn_visibility import silent_turn_metadata
@@ -95,6 +100,32 @@ def test_title_inputs_skips_commands_and_cron_turns():
     session.messages = [
         {"role": "user", "content": "/stop", "_command": True},
         {"role": "user", "content": "cron ping", CRON_HISTORY_META: True},
+        {"role": "user", "content": "real question"},
+        {"role": "assistant", "content": "real answer"},
+    ]
+    user_text, assistant_text = wt._title_inputs(session)
+    assert user_text == "real question"
+    assert assistant_text == "real answer"
+
+
+def test_title_inputs_skips_injected_rows():
+    """Un rientro di subagent o uno sprone a un goal non titolano la chat.
+
+    Portano ``role: "user"`` come il turno di cron qui sopra, e senza marcatore
+    il titolo della conversazione poteva diventare il prompt di un subagent.
+    """
+    session = Session(key="websocket:c2")
+    session.messages = [
+        {
+            "role": "user",
+            "content": "[Subagent 'x' completed successfully]…",
+            INJECTED_EVENT_META: SUBAGENT_RESULT_EVENT,
+        },
+        {
+            "role": "user",
+            "content": "You have an active sustained goal…",
+            INJECTED_EVENT_META: GOAL_CONTINUE_EVENT,
+        },
         {"role": "user", "content": "real question"},
         {"role": "assistant", "content": "real answer"},
     ]

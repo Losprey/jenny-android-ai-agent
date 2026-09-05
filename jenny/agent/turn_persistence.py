@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from jenny.agent.context import ContextBuilder
+from jenny.session.history_meta import (
+    INJECTED_EVENT_META,
+    SUBAGENT_RESULT_EVENT,
+)
 from jenny.utils.helpers import image_placeholder_text
 from jenny.utils.helpers import truncate_text as truncate_text_fn
 
@@ -154,7 +158,8 @@ class TurnPersistenceMixin:
             return False
         task_id = msg.metadata.get("subagent_task_id") if isinstance(msg.metadata, dict) else None
         if task_id and any(
-            m.get("injected_event") == "subagent_result" and m.get("subagent_task_id") == task_id
+            m.get(INJECTED_EVENT_META) == SUBAGENT_RESULT_EVENT
+            and m.get("subagent_task_id") == task_id
             for m in session.messages
         ):
             return False
@@ -162,7 +167,7 @@ class TurnPersistenceMixin:
             "assistant",
             msg.content,
             sender_id=msg.sender_id,
-            injected_event="subagent_result",
+            injected_event=SUBAGENT_RESULT_EVENT,
             subagent_task_id=task_id,
         )
         return True

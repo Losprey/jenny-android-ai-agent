@@ -12,6 +12,11 @@ from jenny.bus.queue import MessageBus
 from jenny.cron.session_turns import CRON_HISTORY_META, CRON_TRIGGER_META
 from jenny.providers.base import LLMResponse
 from jenny.session.goal_state import GOAL_STATE_KEY
+from jenny.session.history_meta import (
+    INJECTED_EVENT_META,
+    SUBAGENT_RESULT_EVENT,
+    is_synthetic_history_row,
+)
 from jenny.session.keys import UNIFIED_SESSION_KEY
 from jenny.session.manager import Session
 from jenny.session.turn_continuation import (
@@ -109,6 +114,68 @@ def test_persist_cron_turn_uses_distinct_history_marker(tmp_path: Path) -> None:
     assert message["cron_job_name"] == "Daily check"
     assert message["cron_run_id"] == "job-1:1"
     assert message["cron_prompt_ref"] == prompt_ref
+
+
+@pytest.mark.asyncio
+async def test_injected_subagent_result_is_marked_in_history(tmp_path: Path) -> None:
+    """L'annuncio di rientro di un subagent non si confonde con l'utente.
+
+    Il gemello di ``test_persist_cron_turn_uses_distinct_history_marker`` per
+    l'altra riga sintetica. ``AgentLoop._drain_pending`` normalizza qualunque
+    messaggio in coda a ``{"role": "user", ...}`` — è la forma che il modello
+    deve vedere — e il turno si persiste con quella forma. Senza riportare la
+    metadata, il rientro di un subagent finiva in storia indistinguibile da una
+    frase digitata: bolla in chat, titolo della conversazione, riarmo
+    dell'heartbeat (v. ``jenny.session.history_meta``).
+    """
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.chat_with_retry = AsyncMock(
+        side_effect=[
+            LLMResponse(content="delego al subagent", finish_reason="stop"),
+            LLMResponse(content="backup ok", finish_reason="stop"),
+        ]
+    )
+
+    pending: asyncio.Queue = asyncio.Queue()
+    pending.put_nowait(
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="websocket:c-announce",
+            content="[Subagent 'backup' completed successfully]\n\nTask: leggi l'hub…",
+            metadata={
+                INJECTED_EVENT_META: SUBAGENT_RESULT_EVENT,
+                "subagent_task_id": "ff0941f9",
+            },
+        )
+    )
+
+    await loop._process_message(
+        InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="c-announce",
+            content="com'è andato il backup?",
+        ),
+        pending_queue=pending,
+    )
+
+    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+    announce = [
+        m for m in session.messages
+        if isinstance(m.get("content"), str) and m["content"].startswith("[Subagent ")
+    ]
+    assert len(announce) == 1, session.messages
+    assert announce[0]["role"] == "user"
+    assert announce[0][INJECTED_EVENT_META] == SUBAGENT_RESULT_EVENT
+    assert announce[0]["subagent_task_id"] == "ff0941f9"
+    assert is_synthetic_history_row(announce[0]) is True
+
+    # Il messaggio vero dell'utente resta quello che è.
+    typed = [m for m in session.messages if m.get("content") == "com'è andato il backup?"]
+    assert len(typed) == 1
+    assert is_synthetic_history_row(typed[0]) is False
 
 
 def test_clean_generated_title_strips_reasoning_tags() -> None:
