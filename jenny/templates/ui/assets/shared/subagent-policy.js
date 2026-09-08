@@ -15,10 +15,46 @@
 
 /* Stati terminali: il subagent non è più in gioco. Il pannello mostra il LAVORO
    VIVO, quindi una card terminale non è storia — è la transizione, che va vista
-   una volta. Resta per il turno corrente e sparisce a `turn_end`; lo storico
-   vero è nella chat (l'orchestratore riassume ogni esito) e nei record su
-   disco. */
+   una volta. Resta per il turno corrente e sparisce a `turn_end`, o comunque
+   scade da sé dopo `SA_LINGER_MS` se quel frame non arriva mai; lo storico vero
+   è nella chat (l'orchestratore riassume ogni esito) e nei record su disco. */
 export const SA_TERMINAL_STATES = ['done', 'failed', 'cancelled'];
+
+/* Quanto vive una card terminale se `turn_end` non arriva mai. `turn_end` resta
+   il modo normale in cui una card sparisce, ma è un frame **live**: nessuno lo
+   ritrasmette a chi non era connesso. Su questo telefono non essere connessi è
+   la norma — Doze, schermo spento, WebView strozzata — e un turno di cron
+   consegnato in quella finestra lascia il pannello senza il proprio sweeper: il
+   client si riattacca, la cronologia ridipinge i messaggi, `liveIds` sopravvive
+   in memoria e il primo poll ripesca il terminato da `recent`. Misurato sul
+   Titan 2: la card di un subagent finito alle 07:00 stava ancora sopra il
+   composer alle 10:18, con un turn_end (08:00) passato nel frattempo.
+
+   L'altra metà dello stesso buco è per costruzione: un subagent ancora vivo a
+   `turn_end` si re-iscrive (v. saVisibleCards), quindi terminerà *dopo* il solo
+   evento che l'avrebbe spazzato — e su un install guidato dai cron il turno
+   successivo può essere a ore di distanza.
+
+   Il tetto è di orologio di parete e non di turni, perché è la freschezza che
+   giustifica la card: la transizione va vista, e dopo un minuto non c'è più
+   niente da vedere. */
+export const SA_LINGER_MS = 60_000;
+
+/* `ended_at` assente o non numerico = freschezza ignota, quindi scaduta: una
+   card che non sa dimostrare di essere appena nata non merita lo spazio sopra il
+   composer. In pratica non capita — ``ended_at`` è ``time.time()`` su ogni
+   record terminale — ma il default deve cadere dalla parte del pannello vuoto. */
+function saEndedAtMs(entry) {
+  const ended = Number(entry?.ended_at);
+  return Number.isFinite(ended) && ended > 0 ? ended * 1000 : NaN;
+}
+
+/** Millisecondi rimasti a una card terminale, 0 se è già scaduta. */
+export function saLingerLeftMs(entry, now = Date.now()) {
+  const endedAt = saEndedAtMs(entry);
+  if (!Number.isFinite(endedAt)) return 0;
+  return Math.max(0, endedAt + SA_LINGER_MS - now);
+}
 
 /* Matrice delle azioni, per stato e per superficie. Tabella e non if/else
    perché è la regola, e il test la rilegge da qui.
@@ -68,17 +104,43 @@ export function saIsTerminal(state) {
  *
  * Ritorna anche `liveIds` aggiornato: i vivi di adesso restano ammessi a
  * lingerare quando termineranno, anche se il turno intanto è finito (un
- * subagent può sopravvivere al turno che l'ha lanciato).
+ * subagent può sopravvivere al turno che l'ha lanciato). Un terminato scaduto
+ * (v. SA_LINGER_MS) invece *esce* da `liveIds`: senza questo il poll successivo
+ * lo ripescherebbe da `recent`, e la scadenza sarebbe un filtro che dimentica.
+ *
+ * `nextExpiryMs` è quanto manca alla prima scadenza fra le card mostrate, o
+ * `null` se non ce ne sono. Serve al chiamante per programmare l'ultimo
+ * ri-render: a zero running non c'è nessun poll che lo faccia da sé, e una
+ * scadenza che nessuno guarda non fa sparire niente.
  */
-export function saVisibleCards(snapshot, liveIds) {
+export function saVisibleCards(snapshot, liveIds, now = Date.now()) {
   const running = Array.isArray(snapshot?.running) ? snapshot.running : [];
   const recent = Array.isArray(snapshot?.recent) ? snapshot.recent : [];
   const live = new Set(liveIds || []);
+  const aliveNow = new Set();
   for (const entry of running) {
-    if (entry && entry.task_id) live.add(String(entry.task_id));
+    if (entry && entry.task_id) {
+      live.add(String(entry.task_id));
+      aliveNow.add(String(entry.task_id));
+    }
   }
-  const lingering = recent.filter(e => e && live.has(String(e.task_id)));
-  return { running, lingering, liveIds: live };
+  const lingering = [];
+  let nextExpiryMs = null;
+  for (const entry of recent) {
+    const taskId = entry && entry.task_id ? String(entry.task_id) : '';
+    if (!taskId || !live.has(taskId)) continue;
+    // Uno stesso id vivo *e* in `recent` non capita, ma se capitasse la card
+    // viva è quella che conta: la scadenza non deve poterla sfrattare.
+    if (aliveNow.has(taskId)) continue;
+    const left = saLingerLeftMs(entry, now);
+    if (left <= 0) {
+      live.delete(taskId);
+      continue;
+    }
+    lingering.push(entry);
+    if (nextExpiryMs === null || left < nextExpiryMs) nextExpiryMs = left;
+  }
+  return { running, lingering, liveIds: live, nextExpiryMs };
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

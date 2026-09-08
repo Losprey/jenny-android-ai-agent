@@ -47,6 +47,29 @@ def test_turn_end_drops_the_terminated_cards() -> None:
     assert "_renderSubagents(" in body
 
 
+def test_the_expiry_has_a_wakeup_of_its_own() -> None:
+    """La scadenza di una card terminale va *applicata*, non solo calcolata.
+
+    A zero running il poll è spento per scelta, quindi l'unico evento che resta
+    è un timer: senza di lui una card scaduta se ne sta a schermo fino al
+    prossimo frame, che su un install guidato dai cron può essere fra ore — che
+    è esattamente il difetto che la scadenza doveva chiudere.
+    """
+    source = _chat()
+    render = re.search(r"_renderSubagents\(snapshot\)\s*\{(.*?)\n  \}", source, re.S)
+    assert render, "_renderSubagents non trovato"
+    assert "_scheduleSubagentExpiry(view.nextExpiryMs)" in render.group(1)
+    sched = re.search(r"_scheduleSubagentExpiry\(nextExpiryMs\)\s*\{(.*?)\n  \}", source, re.S)
+    assert sched, "_scheduleSubagentExpiry non trovato"
+    body = sched.group(1)
+    # Un timer solo, riarmato: due sveglie sovrapposte renderizzano due volte.
+    assert "clearTimeout(this._subagentExpiryTimer)" in body
+    assert "setTimeout(" in body
+    # Ri-render dello snapshot che si ha già: la card deve cadere anche offline.
+    assert "_renderSubagents(this._subagentSnapshot)" in body
+    assert "api." not in body and "fetch(" not in body
+
+
 def test_the_panel_is_hidden_when_there_are_no_cards() -> None:
     """Zero card = elemento `hidden`, non pannello collassato."""
     source = _chat()
