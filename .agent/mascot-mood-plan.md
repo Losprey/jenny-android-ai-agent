@@ -385,6 +385,12 @@ Per uscire dallo standby: default a `true`, `MOOD_STANDBY = false`, il test
 della mappa provvisoria. La pagina utente e `configuration.md` dicono già che è
 spento e perché.
 
+**Provato sul Titan 2 l'08/09/2026**, subito dopo l'installazione (processo
+riavviato alle 14:19:20): un turno utente normale, chiuso in 5,5 s, e poi 15 s di
+ascolto — **zero frame `mascot_mood`**, bucket `mascot` fermo a 6 richieste
+(identico prima e dopo), nessuna riga del sidecar nel log dopo il riavvio. La
+mascotte resta nella sua posa di riposo.
+
 ## Dopo: il parlato espressivo (idea registrata, non pianificata)
 
 Chiesto l'08/09: "c'è parla felice / parla triste?". No: l'umore vale a riposo,
@@ -403,8 +409,15 @@ oltre alle 8 a riposo. Da riaprire come piano suo, dopo il passo 7.
   solo totali (chiuso il 05/09/2026, v. D12).
 - **Quanto spesso il modello risponde `E`?** Se sopra l'80% dei turni, la
   soglia di D4 può salire (meno chiamate) o il prompt va rivisto; se sotto il
-  20%, la mascotte è troppo espressiva e il roleplay stanca. Si misura al passo 5
-  contando i frame su una giornata d'uso.
+  20%, la mascotte è troppo espressiva e il roleplay stanca.
+  **Primo dato d'uso reale, non sintetico (08/09/2026):** la build pre-standby è
+  stata in mano all'utente per una giornata, e il log porta **5 verdetti — 4 `A`
+  (felice) e 1 `E` (neutro)** su 6 richieste contate nel bucket (una senza riga
+  nel buffer di logcat). Il contrario delle due prove costruite del 05/09, che
+  avevano dato `C` entrambe perché Jenny si era accorta di essere messa alla
+  prova: nell'uso vero è **espansiva, non allarmata**. Neutri al ~20%, cioè
+  esattamente il confine sotto il quale questa riga temeva che stancasse.
+  Campione minuscolo: da rimisurare su una settimana quando si riaccende.
 - ~~La latenza del sidecar su un modello di ragionamento~~ Misurata il
   05/09/2026 su `deepseek-v4-flash` con il thinking spento: **0,50 s e 0,65 s**
   dopo il `turn_end`, ~200–250 token in ingresso e 1–3 in uscita per richiesta

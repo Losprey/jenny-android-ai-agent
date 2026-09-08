@@ -12,7 +12,10 @@ lint e pyright puliti. **Passo 2 girato il 05/09/2026**: 9.178 test su 3.14,
 entrate qui perché la pagina promette ogni chiave. **Passo 5 girato il
 05/09/2026** (5.1–5.4): la prima prova ha trovato il thinking di DeepSeek acceso
 nei 3 token, corretto in `e1c2e0e`; la seconda ha dato frame a 0,5–0,65 s e la
-faccia sul telefono. **Passi 3 e 4 girati il 05/09/2026**:
+faccia sul telefono. **Standby girato e provato sul telefono l'08/09/2026**
+(S.1–S.4): niente richieste, niente facce. Del passo 5 restano aperte solo
+l'errore → triste, il turno da Telegram e il PR — e le prime due non si possono
+misurare in standby, quindi aspettano il passo 7. **Passi 3 e 4 girati il 05/09/2026**:
 9.190 test su 3.14, 276 su 3.11 (client, sessione); `MOOD_ART` provvisoria sulle
 pose esistenti per decisione dell'utente — niente arte prevista, il passo 7 resta
 per dopo, fuori da questo PR.
@@ -120,7 +123,8 @@ un force-push.
 - [x] **5.4** Screenshot della faccia a 0 e 1,5 s dal frame: posa `think` (= `worried` provvisoria)
 - [ ] **5.5** Dopo un `error`: faccia `sad`, nessun frame `mascot_mood`
 - [ ] **5.6** Un turno da Telegram fa reagire la mascotte nella WebUI
-- [ ] **5.7** Una giornata d'uso: quota di `neutral` sul totale scritta nel piano
+- [x] **5.7** Una giornata d'uso (08/09, build pre-standby): **4 felice + 1
+      neutro su 6 richieste**, scritto nel piano fra le incognite
 - [ ] **5.8** PR aperto verso `main` con i passi 1–4 (il merge è dell'utente)
 
 ## Standby — 08/09/2026
@@ -129,8 +133,9 @@ un force-push.
 - [x] **S.2** `MOOD_STANDBY = true` in `mobile-jenny.js`, in `_applyMood`; test node
       con harness a `false` più un test con standby acceso e uno che pinna il valore
 - [x] **S.3** `themes-mascot.md` e `configuration.md` dicono che è spento e perché
-- [ ] **S.4** APK dallo standby sul telefono: un turno, nessun frame, bucket
-      `mascot` fermo, mascotte in `idle`
+- [x] **S.4** APK dallo standby sul telefono (08/09/2026): un turno chiuso in
+      5,5 s + 15 s d'ascolto → **0 frame**, bucket `mascot` fermo a 6, nessuna
+      riga del sidecar dopo il riavvio alle 14:19, mascotte nella posa di riposo
 
 ## Passo 6 — l'interruttore *(dopo il 5; in standby non ha senso finché il 7 non c'è)*
 
