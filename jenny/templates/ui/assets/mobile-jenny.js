@@ -383,6 +383,14 @@ export class JennyCompanion {
   /* Stato logico dell'agente. In docked (chat senza out) lo stato 'thinking'
      non ha effetto visivo: Jenny resta sul bordo, side statico. */
   _setAgentState(state) {
+    // Un segnale di parlato tiene viva la bocca **anche a stato invariato**: i
+    // delta di un flusso lungo arrivano tutti come 'talking' e la guardia qui
+    // sotto li scarterebbe tutti tranne il primo. Allora dopo
+    // TALK_QUIET_TO_THINK_MS l'animatore tornerebbe al pensa in mezzo alla
+    // frase e, ripartendo, rimetterebbe animIdx a zero: il gesto del parlato
+    // non cambierebbe mai. Misurato sul telefono l'08/09/2026, 23 scatti su 9
+    // secondi di parlato sempre a braccia giù.
+    if (state === 'talking') this._noteTalkActivity();
     if (this._agentState === state) return;
     this._agentState = state;
     const docked = this.mode === 'chat' && !this.el.classList.contains('out');
@@ -394,7 +402,6 @@ export class JennyCompanion {
     if (state !== 'idle') this._clearMood();
     if (state === 'talking') {
       this.el.classList.remove('thinking');
-      this._noteTalkActivity();
     } else if (state === 'thinking') {
       if (!docked) this.el.classList.add('thinking');
       this._stopTalk();

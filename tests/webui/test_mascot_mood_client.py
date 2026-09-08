@@ -53,6 +53,9 @@ _METHODS = (
     "_faceKey",
     "_syncArt",
     "_talkTick",
+    "_noteTalkActivity",
+    "_stopTalk",
+    "_setAgentState",
 )
 _CONSTS = (
     "ART",
@@ -132,13 +135,20 @@ function makeMascot(...classes) {{
     _reducedMotion: false,
     _talk: {{ timer: null, animIdx: 0, open: false, lastTextAt: 0, switchAt: 0 }},
     states: [],
-    _setAgentState(state) {{ this.states.push(state); }},
     {methods}
   }};
   return m;
 }}
 
 /* Conta i ridisegni senza sostituire _syncArt: quello vero serve intero. */
+/* _setAgentState vero, con la traccia degli stati per chi la guarda. */
+function traceStates(m) {{
+  const real = m._setAgentState.bind(m);
+  m.states = [];
+  m._setAgentState = (state) => {{ m.states.push(state); real(state); }};
+  return m;
+}}
+
 function countSyncs(m) {{
   const real = m._syncArt.bind(m);
   m.syncs = 0;
@@ -225,7 +235,7 @@ def test_a_mood_only_changes_the_face_never_the_body() -> None:
 @node
 def test_talking_flaps_the_face_and_walks_the_body_on_a_slower_clock() -> None:
     _run_js("""
-      const m = makeMascot('out');
+      const m = traceStates(makeMascot('out'));
       const t0 = 10000;
       m._talk.lastTextAt = t0;
       m._talk.switchAt = t0 + TALK_ANIM_SWITCH_MS;
@@ -270,12 +280,57 @@ def test_talking_from_the_edge_stays_on_the_baked_pair() -> None:
 
 
 @node
-def test_silence_in_the_stream_goes_back_to_waiting() -> None:
+def test_every_talking_signal_keeps_the_mouth_alive() -> None:
+    """Un flusso lungo manda 'talking' a ogni delta, non solo al primo.
+
+    Se solo il primo contasse, dopo ``TALK_QUIET_TO_THINK_MS`` l'animatore
+    tornerebbe al pensa in mezzo alla frase e — ripartendo — rimetterebbe
+    ``animIdx`` a zero: il gesto del parlato non cambierebbe **mai**, e
+    ``BODY.hand`` sarebbe un asset che nessuno può vedere. Misurato sul
+    telefono l'08/09/2026: 23 scatti su 9 secondi di parlato, sempre a braccia
+    giù.
+    """
     _run_js("""
       const m = makeMascot('out');
+      m._setAgentState('talking');
+      const first = m._talk.lastTextAt;
+      assert.ok(m._talk.timer, 'l\\'animatore non è partito');
+      const spin = performance.now() + 5;
+      while (performance.now() < spin) { /* fa passare il tempo */ }
+      m._setAgentState('talking');   // stesso stato, nuovo testo
+      assert.ok(m._talk.lastTextAt > first,
+                'un delta a stato invariato non ha tenuto viva la bocca');
+      m._stopTalk();
+    """)
+
+
+@node
+def test_the_talking_gesture_changes_on_its_own_clock() -> None:
+    """Il corpo alterna i due gesti; la bocca no, ha il suo passo."""
+    _run_js("""
+      const m = makeMascot('out');
+      m._setAgentState('talking');
+      const seen = new Set([m.img.src]);
+      // Finge il passare del tempo del gesto senza aspettarlo davvero.
+      for (let i = 0; i < 4; i++) {
+        m._talk.switchAt = performance.now() - 1;
+        m._talk.lastTextAt = performance.now();
+        m._talkTick();
+        seen.add(m.img.src);
+      }
+      assert.deepEqual([...seen].sort(), [...TALK_BODIES].sort());
+      m._stopTalk();
+    """)
+
+
+@node
+def test_silence_in_the_stream_goes_back_to_waiting() -> None:
+    _run_js("""
+      const m = traceStates(makeMascot('out'));
       m._talk.lastTextAt = performance.now() - TALK_QUIET_TO_THINK_MS - 1;
       m._talkTick();
       assert.deepEqual(m.states, ['thinking']);
+      m._stopTalk();
     """)
 
 
