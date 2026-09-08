@@ -14,10 +14,15 @@ time e' il pivot della posa appesa — la punta della manica alzata (la
 li' attorno e' ambigua (le ciocche superano la manica in altezza).
 
 Output in jenny/templates/ui/assets/: jenny-{side,side-talk,hang,fall,
-ground,walk1,walk2,hello1,hello2,idle,think,talk1a,talk1b,talk2a,
-talk2b}.webp, tutti SIZE x SIZE. Nei sorgenti talk_* il numero indica la
-bocca (1=aperta, 2=chiusa) e la lettera la posa (a=mano alzata, b=braccia
-giu'): le coppie di animazione a runtime sono per posa (2a<->1a, 2b<->1b).
+ground,walk1,walk2,hello1,hello2,idle}.webp, tutti SIZE x SIZE.
+
+Il pensa e i quattro frame del parlato non si esportano piu': quello stato
+adesso e' a due livelli (v. LAYERS sotto), e un webp che nessuno mostra
+marcirebbe. I sorgenti restano in cartella: sono il riferimento con cui il
+test della registrazione verifica che corpo + faccia ricompongano l'originale
+(tests/webui/test_mascot_layer_sources.py). Nei sorgenti talk_* il numero
+indica la bocca (1=aperta, 2=chiusa) e la lettera la posa (a=mano alzata,
+b=braccia giu').
 
 **Una variante per posa.** Fino al 08/09/2026 ogni posa esisteva in due
 copie, line-art bianco/nero e colore, e il client rimappava il suffisso
@@ -53,12 +58,7 @@ FILES = [
     ("hello1", "hello1.PNG"),
     ("hello2", "hello2.PNG"),
     ("idle", "idle.PNG"),
-    ("think", "think.PNG"),
     ("side-talk", "jenny-side-talk.PNG"),
-    ("talk1a", "talk_1a.PNG"),
-    ("talk1b", "talk_1b.PNG"),
-    ("talk2a", "talk_2a.PNG"),
-    ("talk2b", "talk_2b.PNG"),
 ]
 
 # Sorgenti a due livelli, esportati come jenny-<stem con i trattini>.webp.

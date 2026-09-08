@@ -24,8 +24,7 @@ from jenny.utils.android_assets import _UI_MANIFEST
 
 pytest.importorskip("PIL", reason="Pillow non è una dipendenza del progetto")
 
-import numpy as np  # noqa: E402
-from PIL import Image  # noqa: E402
+from PIL import Image, ImageChops  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "android" / "image_source"
@@ -80,8 +79,8 @@ def _rgba(path: Path) -> Image.Image:
 
 
 def _max_delta(a: Image.Image, b: Image.Image) -> int:
-    diff = np.abs(np.array(a, dtype=np.int16) - np.array(b, dtype=np.int16))
-    return int(diff.max(axis=2).max())
+    """Lo scarto massimo su tutti i canali, alfa compreso. Solo PIL, niente numpy."""
+    return max(high for _low, high in ImageChops.difference(a, b).getextrema())
 
 
 def test_every_layer_source_is_a_transparent_3000_square() -> None:

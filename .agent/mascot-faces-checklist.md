@@ -11,7 +11,26 @@ davvero colorate) e la guida `COLORARE_LE_POSE.md` è diventata
 `SOSTITUIRE_UNA_POSA.md`, perché di colorare non c'è più niente. **Passo 2
 girato l'08/09/2026**: 9.220 test verdi. I 9 livelli pesano 102 kB (64 di corpi,
 38 di facce), e la registrazione ha un test che la misura — due coppie
-ricompongono la posa cotta con scarto massimo 3 e 2 su 255.
+ricompongono la posa cotta con scarto massimo 3 e 2 su 255. **Passi 3, 4, 5 e 6
+girati l'08/09/2026 in un commit solo**: separarli avrebbe lasciato un contratto
+rosso in mezzo (il client nomina gli umori che il backend manda, e cambiano
+insieme), e le doc raccontano proprio il comportamento che cambia lì. 9.226 test
+verdi; le aree toccate verdi anche su 3.11 (venv ricostruito, si era rotto di
+nuovo).
+
+Deviazioni dal piano, decise strada facendo:
+- **niente classe `layered`**: la faccia si spegne da sé con `_setFace(null)` e
+  una classe sull'img, quindi la decisione sta in un posto solo (JS) invece di
+  due;
+- **`_layered()` è solo `out`**, non `out && !flying`: in volo il layer del
+  volo copre tutto e tenere l'arte a livelli sotto evita un lampo di posa cotta
+  all'atterraggio;
+- **il pensa e i 4 frame del parlato non si esportano più** (5 webp, 120 kB): il
+  livello li ha resi orfani. I sorgenti restano: sono il riferimento del test
+  di registrazione;
+- **`_talkTick` spegne la faccia anche nel ramo docked**: trascinandola al bordo
+  *mentre* parla, `_syncArt` esce subito e la faccia resterebbe accesa sopra
+  un'arte che ce l'ha già dentro. Trovato da un test, non a occhio.
 
 Verifica per ogni passo (da `AGENTS.md`, con la correzione locale
 `python3 -m pytest`, non `pytest`):
@@ -65,43 +84,43 @@ fidarsi — quel venv si è già rotto due volte).
 
 ## Passo 3 — il livello faccia nel client *(un commit, umore ancora fermo)*
 
-- [ ] **3.1** CSS: `.jenny-art-stack`, `img.jenny-face`, specchio e volo
+- [x] **3.1** CSS: `.jenny-art-stack`, `img.jenny-face`, specchio e volo
       spostati sul wrapper, `:not(.layered)` nasconde la faccia; bob e wobble
       non toccati
-- [ ] **3.2** `_buildDom`: wrapper + seconda `img`; il volo resta fratello
-- [ ] **3.3** `BODY`/`FACE`, `_setBody`/`_setFace`, classe `layered`
+- [x] **3.2** `_buildDom`: wrapper + seconda `img`; il volo resta fratello
+- [x] **3.3** `BODY`/`FACE`, `_setBody`/`_setFace`, classe `layered`
       (`out && !flying`)
-- [ ] **3.4** `_syncArt` e `_talkTick` sulla precedenza del piano; ramo cotto
+- [x] **3.4** `_syncArt` e `_talkTick` sulla precedenza del piano; ramo cotto
       invariato
-- [ ] **3.5** preload dei 9
-- [ ] **3.6** test: precedenza della faccia; ramo cotto invariato
-- [ ] **3.7** verifica verde; commit `-s`
+- [x] **3.5** preload dei 9
+- [x] **3.6** test: precedenza della faccia; ramo cotto invariato
+- [x] **3.7** verifica verde; commit `-s`
 
 ## Passo 4 — il vocabolario *(un commit, backend)*
 
-- [ ] **4.1** `MOODS` a quattro, `_LETTER_TO_MOOD` A–D, riga `C` del prompt
-- [ ] **4.2** `config/schema.py`: `mascot_mood` di default `True`
-- [ ] **4.3** test `tests/session/` e `tests/config/` aggiornati
-- [ ] **4.4** verifica verde, **anche su 3.11**; commit `-s`
+- [x] **4.1** `MOODS` a quattro, `_LETTER_TO_MOOD` A–D, riga `C` del prompt
+- [x] **4.2** `config/schema.py`: `mascot_mood` di default `True`
+- [x] **4.3** test `tests/session/` e `tests/config/` aggiornati
+- [x] **4.4** verifica verde, **anche su 3.11**; commit `-s`
 
 ## Passo 5 — l'umore sulle facce *(un commit, client)*
 
-- [ ] **5.1** via `MOOD_ART`, `MOOD_STANDBY`, `MOOD_WORRY_AFTER_MS`,
+- [x] **5.1** via `MOOD_ART`, `MOOD_STANDBY`, `MOOD_WORRY_AFTER_MS`,
       `_armWorry`, `_disarmWorry`, guardia `worried`
-- [ ] **5.2** contratto `MOODS` ⊆ `FACE` in `test_mascot_mood_client.py`;
+- [x] **5.2** contratto `MOODS` ⊆ `FACE` in `test_mascot_mood_client.py`;
       harness senza standby né timer della preoccupazione
-- [ ] **5.3** l'errore fa ancora `sad`
-- [ ] **5.4** verifica verde; commit `-s`
+- [x] **5.3** l'errore fa ancora `sad`
+- [x] **5.4** verifica verde; commit `-s`
 
 ## Passo 6 — documentazione *(stesso PR)*
 
-- [ ] **6.1** `docs/using/themes-mascot.md`: quattro espressioni, due livelli;
+- [x] **6.1** `docs/using/themes-mascot.md`: quattro espressioni, due livelli;
       via lo standby
-- [ ] **6.2** `docs/reference/configuration.md`: `mascotMood` torna `true`
-- [ ] **6.3** `docs/reference/websocket.md`: etichette del frame
-- [ ] **6.4** note di superamento su `mascot-mood-plan.md` (D7, D13, Standby) e
+- [x] **6.2** `docs/reference/configuration.md`: `mascotMood` torna `true`
+- [x] **6.3** `docs/reference/websocket.md`: etichette del frame
+- [x] **6.4** note di superamento su `mascot-mood-plan.md` (D7, D13, Standby) e
       sulla sua checklist (passo 7 → qui)
-- [ ] **6.5** nessun file di `docs/` spostato o rinominato
+- [x] **6.5** nessun file di `docs/` spostato o rinominato
 
 ## Passo 7 — sul telefono *(nessun codice; misure nel piano)*
 
