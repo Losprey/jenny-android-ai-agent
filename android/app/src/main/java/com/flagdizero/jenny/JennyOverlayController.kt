@@ -366,8 +366,9 @@ class JennyOverlayController(private val context: Context) {
             }
             if (artFeetFrac >= 1f && artPollCount < ART_POLL_MAX) {
                 artPollCount++
-                artPollRunnable = Runnable { pollArtAndPrefs() }
-                mainHandler.postDelayed(artPollRunnable, ART_POLL_MS)
+                val pollRunnable = Runnable { pollArtAndPrefs() }
+                artPollRunnable = pollRunnable
+                mainHandler.postDelayed(pollRunnable, ART_POLL_MS)
             } else {
                 artPollCount = 0
             }
@@ -427,10 +428,11 @@ class JennyOverlayController(private val context: Context) {
                 velocityTracker = VelocityTracker.obtain().apply {
                     addMovement(event)
                 }
-                commitRunnable = Runnable {
+                val commitRun = Runnable {
                     commitDrag(lp)
                 }
-                mainHandler.postDelayed(commitRunnable, HOLD_COMMIT_MS)
+                commitRunnable = commitRun
+                mainHandler.postDelayed(commitRun, HOLD_COMMIT_MS)
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -641,11 +643,12 @@ class JennyOverlayController(private val context: Context) {
         phase = Phase.IDLE
         applyPose("ground")
         settleRunnable?.let { mainHandler.removeCallbacks(it) }
-        settleRunnable = Runnable {
+        val sitRunnable = Runnable {
             settleRunnable = null
             if (phase == Phase.IDLE && petView != null) applyPose("idle")
         }
-        mainHandler.postDelayed(settleRunnable, SIT_GROUND_MS)
+        settleRunnable = sitRunnable
+        mainHandler.postDelayed(sitRunnable, SIT_GROUND_MS)
     }
 
     // ------------------------------------------------------------- bersaglio
