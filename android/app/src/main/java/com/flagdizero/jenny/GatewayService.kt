@@ -49,6 +49,7 @@ class GatewayService : Service() {
          *  una sveglia di lavoro, non un semplice "assicurati che sia su". */
         const val EXTRA_WAKE_TICK = "com.flagdizero.jenny.extra.WAKE_TICK"
         const val ACTION_SHOW_OVERLAY = "com.flagdizero.jenny.action.SHOW_OVERLAY"
+        const val ACTION_HIDE_OVERLAY = "com.flagdizero.jenny.action.HIDE_OVERLAY"
 
         /** Pausa fra l'uscita di `run_gateway` e il tentativo di rilanciarlo
          *  nello stesso thread. Allineata a `RETRY_DELAY_S` di
@@ -226,8 +227,17 @@ class GatewayService : Service() {
         if (intent?.getBooleanExtra(EXTRA_WAKE_TICK, false) == true) {
             deliverWakeTick()
         }
-        if (::mascotOverlay.isInitialized && intent?.action == ACTION_SHOW_OVERLAY) {
-            mascotOverlay.startIfAllowed()
+        when (intent?.action) {
+            ACTION_SHOW_OVERLAY -> if (::mascotOverlay.isInitialized) {
+                // `startIfAllowed` rispetta la preferenza "nascosta": se l'utente
+                // ha nascosto la mascotte non la ripropone (nemmeno dopo un
+                // riavvio sticky). Il toggle della SPA azzera la preferenza
+                // prima di mandare ACTION_SHOW_OVERLAY.
+                mascotOverlay.startIfAllowed()
+            }
+            ACTION_HIDE_OVERLAY -> if (::mascotOverlay.isInitialized) {
+                mascotOverlay.hide()
+            }
         }
         return START_STICKY
     }

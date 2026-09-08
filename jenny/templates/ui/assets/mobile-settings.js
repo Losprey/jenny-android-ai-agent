@@ -1467,6 +1467,25 @@ export class SettingsController {
         ${id === size ? '<i class="ti ti-check"></i>' : ''}
       </button>`
     ).join('');
+    // Mascotte overlay (desktop pet sopra le altre app): disponibile solo nel
+    // build Android — il bridge JennyNative non esiste sul preview desktop.
+    let overlayBlock = '';
+    const nat = window.JennyNative;
+    if (nat && typeof nat.overlayMascotVisible === 'function' &&
+        typeof nat.setOverlayMascotVisible === 'function') {
+      let overlayVisible = false;
+      try { overlayVisible = !!nat.overlayMascotVisible(); } catch (e) { /* noop */ }
+      overlayBlock = `
+      <div class="theme-strip-eyebrow">${i18n.t('settings.overlaySection')}</div>
+      <div class="settings-field settings-toggle-row">
+        <label class="settings-label">${i18n.t('settings.overlayVisible')}</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="overlay-visible-toggle" ${overlayVisible ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <p class="settings-hint" style="margin:6px 0 10px;font-size:12px;color:var(--text-faint)">${i18n.t('settings.overlayHint')}</p>`;
+    }
     return `
       <div class="theme-strip-eyebrow">${i18n.t('settings.mascotSection')}</div>
       <div class="settings-field settings-toggle-row">
@@ -1486,7 +1505,7 @@ export class SettingsController {
           <input type="checkbox" id="mascot-color-toggle" ${color ? 'checked' : ''}${off}>
           <span class="toggle-slider"></span>
         </label>
-      </div>`;
+      </div>${overlayBlock}`;
   }
 
   // ── Tasto Home ─────────────────────────────────────────────────────
@@ -2315,6 +2334,22 @@ export class SettingsController {
     const mascotColorToggle = this.contentEl.querySelector('#mascot-color-toggle');
     if (mascotColorToggle) {
       mascotColorToggle.addEventListener('change', () => setMascotColor(mascotColorToggle.checked));
+    }
+    // Mascotte overlay: il toggle parla col bridge nativo (mostra/nasconde la
+    // finestra sopra le altre app e salva la scelta in SharedPreferences).
+    const overlayToggle = this.contentEl.querySelector('#overlay-visible-toggle');
+    const nativeOverlay = window.JennyNative;
+    if (overlayToggle && nativeOverlay && typeof nativeOverlay.setOverlayMascotVisible === 'function') {
+      overlayToggle.addEventListener('change', () => {
+        const target = overlayToggle.checked;
+        // Il bridge ritorna lo stato effettivo (false se manca il permesso di
+        // sistema e ha appena riaperto la richiesta): risincronizza il toggle.
+        try {
+          overlayToggle.checked = nativeOverlay.setOverlayMascotVisible(target) === true;
+        } catch (e) {
+          overlayToggle.checked = !target;
+        }
+      });
     }
 
     // Tasto Home: nessun re-render, il valore serve solo a goHome()

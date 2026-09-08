@@ -225,6 +225,7 @@ _UI_MANIFEST = [
     "assets/jenny-hello2.webp",
     "assets/jenny-idle-color.webp",
     "assets/jenny-idle.webp",
+    "assets/jenny-overlay.html",
     "assets/jenny-side-talk-color.webp",
     "assets/jenny-side-talk.webp",
     "assets/jenny-side-color.webp",

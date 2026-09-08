@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Jenny overlay</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent; overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: flex-end; justify-content: center;
+    pointer-events: none;
+  }
+  #flip { width: 100%; height: 100%; }
+  #art {
+    display: block; width: 100%; height: 100%;
+    object-fit: contain; object-position: center bottom;
+  }
+  /* Stessa animazione dell'idle "sospeso" della chat (mobile-style.css). */
+  #art.bob {
+    animation: jenny-bob 3.4s ease-in-out infinite;
+    transform-origin: 50% 100%;
+  }
+  @keyframes jenny-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(var(--jenny-bob, -4px)); }
+  }
+</style>
+</head>
+<body>
+  <div id="stage"><div id="flip"><img id="art" alt=""></div></div>
+<script>
+(function () {
+  'use strict';
+
+  var ASSET = '/html-mobile/assets/';
+  var ART = {
+    idle: 'jenny-idle.webp',
+    hang: 'jenny-hang.webp',
+    fall: 'jenny-fall.webp',
+    ground: 'jenny-ground.webp'
+  };
+
+  var flipEl = document.getElementById('flip');
+  var art = document.getElementById('art');
+
+  /* ---- Preferenze condivise con la SPA: stesso origin (127.0.0.1:18790),
+          quindi la stessa localStorage usata da shared/mascot.js. ---- */
+  function readPref(key, fallback) {
+    try {
+      var v = localStorage.getItem(key);
+      return v === null ? fallback : v;
+    } catch (e) { return fallback; }
+  }
+  function colorEnabled() { return readPref('jenny-mascotte-color', '1') !== '0'; }
+  function mascotSize()    { return readPref('jenny-mascotte-size', 'sm'); }
+
+  function assetFor(name) {
+    var base = ART[name] || ART.idle;
+    if (colorEnabled() && base.indexOf('-color') === -1) {
+      base = base.replace(/\.webp$/, '-color.webp');
+    }
+    return ASSET + base;
+  }
+
+  /* ---- Misura del riquadro disegnato (dove finiscono testa/piedi).
+          Frazioni rispetto al box dell'elemento: invarianti al resize. ---- */
+  var boxCache = {};   // url -> {t, b, l, r}
+  function measureArt(url, el) {
+    var cw = el.clientWidth || window.innerWidth || 120;
+    var ch = el.clientHeight || window.innerHeight || 120;
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, cw);
+    canvas.height = Math.max(1, ch);
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.drawImage(el, 0, 0, cw, ch);
+    var data;
+    try { data = ctx.getImageData(0, 0, cw, ch).data; } catch (e) { return null; }
+    var top = -1, bottom = -1, left = -1, right = -1, p = 0;
+    for (var y = 0; y < ch; y++) {
+      for (var x = 0; x < cw; x++) {
+        if (data[p + 3] > 12) {
+          if (top < 0) top = y;
+          bottom = y;
+          if (left < 0) left = x;
+          right = x;
+        }
+        p += 4;
+      }
+    }
+    if (top < 0) return null;
+    var box = {
+      t: top / ch,
+      b: (bottom + 1) / ch,
+      l: left / cw,
+      r: (right + 1) / cw
+    };
+    boxCache[url] = box;
+    return box;
+  }
+
+  var idleUrl = assetFor('idle');
+  var idleBox = null;   // riquadro dell'idle: è la "linea del suolo" della mascotte
+
+  function afterShown(name) {
+    if (name === 'idle') {
+      if (!idleBox) idleBox = measureArt(idleUrl, art);
+      // Il bob non deve far uscire la testa dal finestrino: corsa limitata
+      // dallo spazio trasparente sopra la testa, come fa la chat (solo -4px).
+      var headroom = idleBox ? idleBox.t * (art.clientHeight || 0) : 0;
+      var lift = Math.max(0, Math.min(4, headroom - 1));
+      art.style.setProperty('--jenny-bob', (-lift) + 'px');
+      art.classList.add('bob');
+    } else {
+      art.classList.remove('bob');
+    }
+  }
+
+  var retries = 0;
+  var lastUrl = null;
+  var seq = 0;
+
+  /* Comando dal controller Kotlin: setPose('idle'|'hang'|'fall'|'ground', left). */
+  function setPose(name, left) {
+    flipEl.style.transform = left ? 'scaleX(-1)' : 'scaleX(1)';
+    var url = assetFor(name);
+    if (lastUrl === url && art.complete && art.naturalWidth > 0) {
+      afterShown(name);
+      return;
+    }
+    var mySeq = ++seq;
+    var pre = new Image();
+    pre.onload = function () {
+      if (mySeq !== seq) return; // nel frattempo è arrivata una posa più nuova
+      retries = 0;
+      art.onload = function () {
+        if (mySeq !== seq) return;
+        lastUrl = url;
+        afterShown(name);
+      };
+      art.src = url;
+    };
+    pre.onerror = function () {
+      if (mySeq !== seq) return;
+      if (retries < 12) {
+        retries++;
+        setTimeout(function () { if (mySeq === seq) setPose(name, left); }, 800);
+      }
+    };
+    pre.src = url;
+  }
+
+  /* Letto da Kotlin a polling finché i piedi non sono misurati. */
+  window.__jennyArtTop = function () { return idleBox ? idleBox.t : -1; };
+  window.__jennyArtBottom = function () { return idleBox ? idleBox.b : -1; };
+  window.__jennyPrefs = function () {
+    return { size: mascotSize(), color: colorEnabled() };
+  };
+
+  /* Comandi dal controller Kotlin: setPose('idle'|'hang'|'fall'|'ground', left). */
+  window.__jennySetPose = function (state, left) { setPose(state, left); };
+
+  setPose('idle', false);
+})();
+</script>
+</body>
+</html>

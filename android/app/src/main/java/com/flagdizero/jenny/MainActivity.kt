@@ -681,12 +681,19 @@ class MainActivity : AppCompatActivity() {
         // l'uninstaller di sistema): ora la SPA può aggiornare la griglia.
         flushPackageNotices()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) {
-            ContextCompat.startForegroundService(
-                this,
-                Intent(this, GatewayService::class.java).apply {
-                    action = GatewayService.ACTION_SHOW_OVERLAY
-                }
-            )
+            // Non si ripropone la mascotte se l'utente l'ha nascosta: la scelta
+            // (preferenza "overlay"/"hidden") resta finché non la riaccende
+            // dal toggle nella SPA.
+            val hidden = getSharedPreferences("overlay", MODE_PRIVATE)
+                .getBoolean("hidden", false)
+            if (!hidden) {
+                ContextCompat.startForegroundService(
+                    this,
+                    Intent(this, GatewayService::class.java).apply {
+                        action = GatewayService.ACTION_SHOW_OVERLAY
+                    }
+                )
+            }
         }
     }
 
@@ -1109,6 +1116,57 @@ class MainActivity : AppCompatActivity() {
                 window.navigationBarColor = color
                 applyBarAppearance(light)
             }
+        }
+
+        // ── Mascotte overlay (desktop pet) ──
+
+        /** La SPA chiede se la mascotte overlay è attiva (permesso di sistema
+         *  concesso e non nascosta dall'utente). */
+        @JavascriptInterface
+        fun overlayMascotVisible(): Boolean {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            if (prefs.getBoolean("hidden", false)) return false
+            return Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                Settings.canDrawOverlays(this@MainActivity)
+        }
+
+        /** Mostra/nasconde la mascotte overlay. Se all'accensione manca il
+         *  permesso di sistema, riapre la richiesta una volta. Ritorna lo stato
+         *  effettivo così la SPA può risincronizzare il toggle. */
+        @JavascriptInterface
+        fun setOverlayMascotVisible(visible: Boolean): Boolean {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            if (visible) {
+                val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                    Settings.canDrawOverlays(this@MainActivity)
+                if (!granted) {
+                    // Acceso senza permesso: si azzera il "già chiesto" così la
+                    // richiesta di sistema riparte davvero.
+                    prefs.edit().putBoolean("asked", false).apply()
+                    runOnUiThread { requestOverlayPermissionOnce() }
+                    return false
+                }
+                prefs.edit().putBoolean("hidden", false).apply()
+                runOnUiThread {
+                    ContextCompat.startForegroundService(
+                        this@MainActivity,
+                        Intent(this@MainActivity, GatewayService::class.java).apply {
+                            action = GatewayService.ACTION_SHOW_OVERLAY
+                        }
+                    )
+                }
+                return true
+            }
+            prefs.edit().putBoolean("hidden", true).apply()
+            runOnUiThread {
+                ContextCompat.startForegroundService(
+                    this@MainActivity,
+                    Intent(this@MainActivity, GatewayService::class.java).apply {
+                        action = GatewayService.ACTION_HIDE_OVERLAY
+                    }
+                )
+            }
+            return false
         }
 
         // ── Backup e ripristino ──
