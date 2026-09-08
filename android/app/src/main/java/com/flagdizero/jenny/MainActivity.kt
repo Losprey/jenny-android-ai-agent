@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.provider.Settings
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
@@ -477,6 +478,16 @@ class MainActivity : AppCompatActivity() {
         ensureNotificationPermission()
         registerPackageChangeReceiver()
         startGatewayAndLoad()
+        requestOverlayPermissionOnce()
+    }
+
+    private fun requestOverlayPermissionOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (Settings.canDrawOverlays(this)) return
+        val prefs = getSharedPreferences("overlay", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("asked", false)) return
+        prefs.edit().putBoolean("asked", true).apply()
+        startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
     }
 
     override fun onDestroy() {
@@ -669,6 +680,14 @@ class MainActivity : AppCompatActivity() {
         // Pacchetti installati/disinstallati mentre eravamo dietro (tipicamente
         // l'uninstaller di sistema): ora la SPA può aggiornare la griglia.
         flushPackageNotices()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this)) {
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, GatewayService::class.java).apply {
+                    action = GatewayService.ACTION_SHOW_OVERLAY
+                }
+            )
+        }
     }
 
     private fun startGatewayAndLoad() {

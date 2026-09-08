@@ -48,6 +48,7 @@ class GatewayService : Service() {
         /** Extra con cui `WakeReceiver` segnala che questo avvio è il tick di
          *  una sveglia di lavoro, non un semplice "assicurati che sia su". */
         const val EXTRA_WAKE_TICK = "com.flagdizero.jenny.extra.WAKE_TICK"
+        const val ACTION_SHOW_OVERLAY = "com.flagdizero.jenny.action.SHOW_OVERLAY"
 
         /** Pausa fra l'uscita di `run_gateway` e il tentativo di rilanciarlo
          *  nello stesso thread. Allineata a `RETRY_DELAY_S` di
@@ -163,6 +164,8 @@ class GatewayService : Service() {
      */
     private var hasLocationType = false
 
+    private lateinit var mascotOverlay: JennyOverlayController
+
     override fun onCreate() {
         super.onCreate()
         isRunning = true
@@ -198,6 +201,8 @@ class GatewayService : Service() {
         // l'utente l'ha spenta si disarma da sé invece di riarmarsi.
         AlarmClockFallback.arm(this)
         startGateway()
+        mascotOverlay = JennyOverlayController(this)
+        mascotOverlay.startIfAllowed()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -220,6 +225,9 @@ class GatewayService : Service() {
         startGateway()
         if (intent?.getBooleanExtra(EXTRA_WAKE_TICK, false) == true) {
             deliverWakeTick()
+        }
+        if (::mascotOverlay.isInitialized && intent?.action == ACTION_SHOW_OVERLAY) {
+            mascotOverlay.startIfAllowed()
         }
         return START_STICKY
     }
@@ -281,6 +289,7 @@ class GatewayService : Service() {
      * startForegroundService su un service vivo passa solo da onStartCommand.
      */
     override fun onDestroy() {
+        if (::mascotOverlay.isInitialized) mascotOverlay.stop()
         // Per primo, prima di qualunque cosa possa sollevare: da qui in avanti
         // il watchdog deve vedere "giù". Lasciarlo a `true` su un service
         // distrutto è l'unico modo in cui il flag statico può mentire.
