@@ -20,6 +20,12 @@ una ``classList`` e due ``img`` minime: non toccano il DOM oltre a quelle. Il
 contratto in coda tiene allineate le etichette Python (``MOODS``) e la lista JS
 (``MOOD_FACES``), e pretende che ogni faccia e ogni corpo siano un file vero e
 nel manifest Android.
+
+**Un apostrofo nei messaggi di assert va scritto ``\\'``, non ``\'``.** Lo
+script JS sta in una stringa Python normale, che ``\'`` lo consuma: node
+riceve un apice non protetto e muore di ``SyntaxError`` — e il test fallisce
+sul ``returncode``, indicando questa riga invece di quella vera. Costato due
+volte l'08/09/2026.
 """
 
 from __future__ import annotations
