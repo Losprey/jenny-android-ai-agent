@@ -19,10 +19,10 @@ talk2b}.webp, tutti SIZE x SIZE. Nei sorgenti talk_* il numero indica la
 bocca (1=aperta, 2=chiusa) e la lettera la posa (a=mano alzata, b=braccia
 giu'): le coppie di animazione a runtime sono per posa (2a<->1a, 2b<->1b).
 
-Ogni posa esiste in due varianti: bianco/nero (line-art, sorgente
-<stem>.PNG) e colore (sorgente <stem>_color.PNG). La variante colore va nel
-file jenny-<name>-color.webp; a runtime la scelta B/N<->colore e' una
-preferenza client-side (shared/mascot.js) che rimappa il suffisso.
+**Una variante per posa.** Fino al 08/09/2026 ogni posa esisteva in due
+copie, line-art bianco/nero e colore, e il client rimappava il suffisso
+-color su una preferenza dell'utente. La preferenza e' stata ritirata
+(v. .agent/mascot-faces-plan.md, F9): resta il colore, col nome piano.
 """
 from pathlib import Path
 
@@ -37,21 +37,21 @@ QUALITY = 80
 HAND_PIVOT = (1525, 1300)
 
 FILES = [
-    ("side", "jenny-side.png"),
-    ("hang", "jenny-hang.png"),
-    ("fall", "jenny-fall.png"),
-    ("ground", "jenny-ground.png"),
-    ("walk1", "jenny-walk1.png"),
-    ("walk2", "jenny-walk2.png"),
-    ("hello1", "hello1.png"),
-    ("hello2", "hello2.png"),
-    ("idle", "idle.png"),
-    ("think", "think.png"),
-    ("side-talk", "jenny-side-talk.png"),
-    ("talk1a", "talk_1a.png"),
-    ("talk1b", "talk_1b.png"),
-    ("talk2a", "talk_2a.png"),
-    ("talk2b", "talk_2b.png"),
+    ("side", "jenny-side.PNG"),
+    ("hang", "jenny-hang.PNG"),
+    ("fall", "jenny-fall.PNG"),
+    ("ground", "jenny-ground.PNG"),
+    ("walk1", "jenny-walk1.PNG"),
+    ("walk2", "jenny-walk2.PNG"),
+    ("hello1", "hello1.PNG"),
+    ("hello2", "hello2.PNG"),
+    ("idle", "idle.PNG"),
+    ("think", "think.PNG"),
+    ("side-talk", "jenny-side-talk.PNG"),
+    ("talk1a", "talk_1a.PNG"),
+    ("talk1b", "talk_1b.PNG"),
+    ("talk2a", "talk_2a.PNG"),
+    ("talk2b", "talk_2b.PNG"),
 ]
 
 def _export(src_png: Path, dest: Path) -> None:
@@ -64,9 +64,6 @@ def _export(src_png: Path, dest: Path) -> None:
 
 if __name__ == "__main__":
     for name, png in FILES:
-        stem = Path(png).stem
-        # Variante bianco/nero (line-art) + variante colore, per posa.
         _export(SRC / png, OUT / f"jenny-{name}.webp")
-        _export(SRC / f"{stem}_color.PNG", OUT / f"jenny-{name}-color.webp")
 
     print(f"PIVOT_X = {HAND_PIVOT[0] / 3000:.4f}; PIVOT_Y = {HAND_PIVOT[1] / 3000:.4f}")

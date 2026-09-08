@@ -11,11 +11,12 @@ letto a runtime: è solo il punto di partenza della build degli asset.
   `jenny-ground.PNG`, `jenny-walk1.PNG`, `jenny-walk2.PNG`, `hello1/2.PNG`,
   `idle.PNG`, `think.PNG`, `talk_1a/1b/2a/2b.PNG` — pose della mascotte,
   canvas 3000×3000, tutte cablate in `gen_pose_webp.py`.
-- `*_color.PNG` — la stessa posa nella variante **colore** (line-art riempita).
-  Ogni posa ha il suo gemello `<stem>_color.PNG`; `gen_pose_webp.py` li esporta
-  in `jenny-<name>-color.webp`. A runtime la scelta B/N ↔ colore è una
-  preferenza client-side (`Impostazioni → Personalizzazione → Mascotte a
-  colori`, v. `shared/mascot.js::poseUrl`). L'icona app resta solo B/N.
+  **Una variante per posa**, a colori. Fino all'08/09/2026 ogni posa aveva
+  un gemello `<stem>_color.PNG` e il client rimappava il suffisso `-color` su
+  una preferenza dell'utente; la preferenza è stata ritirata e la line-art coi
+  gemelli B/N è uscita dal repo (recuperabile dalla storia — v.
+  `.agent/mascot-faces-plan.md`, F9). L'icona app resta line-art: `icon.png` è
+  un sorgente a sé e non c'entra con le pose.
 - `gen_icons.py` — genera le icone Android da `icon.png`.
 - `gen_pose_webp.py` — esporta le pose della mascotte in webp per la WebUI.
 
@@ -121,18 +122,17 @@ la mascotte viene trascinata:
 
 ### Output
 
-`FILES` mappa nome-posa → PNG sorgente e scrive **30 webp** in
-`jenny/templates/ui/assets/`: per ogni posa la variante B/N
+`FILES` mappa nome-posa → PNG sorgente e scrive **15 webp** in
+`jenny/templates/ui/assets/`, uno per posa:
 `jenny-{side,side-talk,hang,fall,ground,walk1,walk2,hello1,hello2,idle,think,
-talk1a,talk1b,talk2a,talk2b}.webp` più il gemello colore
-`jenny-<name>-color.webp` (sorgente `<stem>_color.PNG`). Ogni sorgente deve
-essere esattamente 3000×3000 (assert esplicito) o lo script si ferma.
+talk1a,talk1b,talk2a,talk2b}.webp`. Ogni sorgente deve essere esattamente
+3000×3000 (assert esplicito) o lo script si ferma.
 
 ## Rigenerare
 
 Per il flusso pratico "sostituisco un sorgente → rigenero → carico sul
 telefono" (con tabella nomi file e checklist) vedi
-[`COLORARE_LE_POSE.md`](./COLORARE_LE_POSE.md).
+[`SOSTITUIRE_UNA_POSA.md`](./SOSTITUIRE_UNA_POSA.md).
 
 ```bash
 # dalla cartella android/image_source/

@@ -15,7 +15,7 @@ import { wsManager } from './shared/ws-manager.js';
 import { sessionManager } from './shared/session-manager.js';
 import { i18n } from './shared/i18n.js';
 import {
-  mascotVisible, mascotSide, setMascotSide, poseUrl, applyMascotSize,
+  mascotVisible, mascotSide, setMascotSide, applyMascotSize,
 } from './shared/mascot.js';
 
 const ART = {
@@ -173,7 +173,7 @@ export class JennyCompanion {
     // frame vuoti al primo swap.
     for (const src of [ART.think, ART.sideTalk, ...TALK_ANIMS.flat(), ...Object.values(MOOD_ART)]) {
       const im = new Image();
-      im.src = poseUrl(src);
+      im.src = src;
     }
 
     this._onWsMessage = (e) => this._handleWsMessage(e.detail);
@@ -278,7 +278,7 @@ export class JennyCompanion {
     this.el.setAttribute('tabindex', '-1');
     const img = document.createElement('img');
     img.className = 'jenny-art';
-    img.src = poseUrl(ART.side);
+    img.src = ART.side;
     img.alt = '';
     img.draggable = false;
     this.el.appendChild(img);
@@ -291,7 +291,7 @@ export class JennyCompanion {
     this.flyPose = {};
     for (const [key, src] of Object.entries(FLY_POSES)) {
       const im = document.createElement('img');
-      im.src = poseUrl(src);
+      im.src = src;
       im.alt = '';
       im.draggable = false;
       this.fly.appendChild(im);
@@ -330,7 +330,7 @@ export class JennyCompanion {
      jenny-side / jenny-side-talk: a riposo sul bordo / parlato semplificato.
    */
   _setArt(state) {
-    this._setSrc(poseUrl(ART[state]));
+    this._setSrc(ART[state]);
   }
 
   _setSrc(src) {
@@ -343,7 +343,7 @@ export class JennyCompanion {
     if (this._talk.timer) return; // il frame lo gestisce l'animatore del parlato
     const mood = this._moodPose();
     if (mood) {
-      this._setSrc(poseUrl(MOOD_ART[mood]));
+      this._setSrc(MOOD_ART[mood]);
       return;
     }
     if (this.el.classList.contains('thinking')) {
@@ -488,7 +488,7 @@ export class JennyCompanion {
       return;
     }
     this._talk.open = !this._talk.open;
-    const src = poseUrl(pair[this._talk.open ? 1 : 0]);
+    const src = pair[this._talk.open ? 1 : 0];
     if (this.img.getAttribute('src') !== src) this.img.src = src;
   }
 
@@ -532,16 +532,12 @@ export class JennyCompanion {
     this._updateGestureExclusion();
   }
 
-  /* Riallinea visibilità, lato e variante colore quando l'utente cambia le
-     preferenze da Impostazioni → Personalizzazione (evento 'mascotchange'). */
+  /* Riallinea visibilità e lato quando l'utente cambia le preferenze da
+     Impostazioni → Personalizzazione (evento 'mascotchange'). Le img del volo
+     hanno src fisso a creazione e non si ricablano più: da quando l'arte ha
+     una sola variante, il loro path non dipende da nessuna preferenza. */
   _applyMascotPrefs() {
     this._applySide();
-    // Le img del volo hanno src fisso a creazione: ricablale sulla variante
-    // attiva (B/N <-> colore). L'arte statica/parlato si ri-risolve da sola
-    // via poseUrl al prossimo _syncArt / _talkTick.
-    for (const [key, base] of Object.entries(FLY_POSES)) {
-      if (this.flyPose[key]) this.flyPose[key].src = poseUrl(base);
-    }
     this.setMode(this.mode);
     if (!this._talk.timer) this._syncArt();
   }

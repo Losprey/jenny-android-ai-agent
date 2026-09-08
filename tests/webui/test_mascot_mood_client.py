@@ -283,5 +283,3 @@ def test_mood_art_borrows_only_poses_that_exist_and_ship() -> None:
         rel = url.removeprefix("/html-mobile/")
         assert rel in manifest, f"{mood}: {rel} non è in _UI_MANIFEST"
         assert (ASSETS.parent / rel).is_file(), f"{mood}: {rel} non esiste"
-        color = rel.replace(".webp", "-color.webp")
-        assert color in manifest, f"{mood}: manca la variante colore {color}"
