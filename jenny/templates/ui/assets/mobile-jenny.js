@@ -45,6 +45,34 @@ const CONNECT_TIMEOUT_MS = 6000;
 const REPLY_TIMEOUT_MS = 90000;
 const REPLY_MAX_CHARS = 280;
 
+/* ── Umore ──
+   Dopo il turn_end il backend può mandare un frame `mascot_mood` con la
+   reazione di Jenny alla risposta appena data (jenny/session/mascot_mood.py:
+   una lettera chiesta al modello fuori dal turno). Qui è uno strato SOPRA lo
+   stato dell'agente, non un quarto stato: si mostra solo a mascotte intera
+   (`out`), ferma e non in volo, e decade da sé dopo MOOD_HOLD_MS.
+
+   MOOD_ART è PROVVISORIA: l'arte dedicata alle espressioni non esiste ancora e
+   qui non la si prevede — ogni etichetta prende in prestito una posa che c'è
+   già, così il meccanismo si prova sul telefono senza disegnare. Le chiavi
+   sono le etichette del backend (`MOODS` meno `neutral`, che non produce
+   frame): un contratto in tests/webui le tiene allineate. */
+const MOOD_ART = {
+  happy: '/html-mobile/assets/jenny-hello1.webp', // provvisoria: braccio alzato
+  sad: '/html-mobile/assets/jenny-ground.webp', // provvisoria: a terra, stordita
+  worried: '/html-mobile/assets/jenny-think.webp', // provvisoria: la posa del pensa
+  surprised: '/html-mobile/assets/jenny-talk1a.webp', // provvisoria: bocca aperta
+};
+/* STANDBY (08/09/2026): con `true` nessuna posa cambia mai per l'umore — né dal
+   frame `mascot_mood`, né dal livello 0 (errore, attesa lunga). Tutto passa da
+   _applyMood, che qui si ferma. Gemello lato backend: `agents.defaults.mascotMood`
+   spento di default. Si riaccende quando le espressioni saranno disegnate. */
+const MOOD_STANDBY = true;
+const MOOD_HOLD_MS = 12000; // quanto dura una faccia prima di tornare idle
+/* Livello 0, gratis: un pensa che dura più di così diventa preoccupata, senza
+   chiedere niente a nessuno. Si disarma al primo frame che cambia stato. */
+const MOOD_WORRY_AFTER_MS = 20000;
+
 /* ── Volo Pegman (fisica validata nella demo) ──
    Lo sprite pegman appare solo quando il drag e' commesso (hold oltre
    HOLD_DELAY_MS, oppure movimento oltre TAP_SLOP). Il tap secco fa toggle
@@ -128,6 +156,14 @@ export class JennyCompanion {
     };
     this._reducedMotion =
       window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    // Umore (v. MOOD_ART): etichetta viva, scadenza, e l'id dell'ultimo turno
+    // chiuso — un frame `mascot_mood` di un altro turno è una reazione a una
+    // risposta che non è più l'ultima, e si scarta.
+    this._mood = null;
+    this._moodUntil = 0;
+    this._moodTimer = null;
+    this._worryTimer = null;
+    this._lastClosedTurnId = null;
 
     this._buildDom();
     this._bindDrag();
@@ -135,7 +171,7 @@ export class JennyCompanion {
 
     // Preload dell'arte degli stati (think + frame del parlato): evita
     // frame vuoti al primo swap.
-    for (const src of [ART.think, ART.sideTalk, ...TALK_ANIMS.flat()]) {
+    for (const src of [ART.think, ART.sideTalk, ...TALK_ANIMS.flat(), ...Object.values(MOOD_ART)]) {
       const im = new Image();
       im.src = poseUrl(src);
     }
@@ -294,13 +330,22 @@ export class JennyCompanion {
      jenny-side / jenny-side-talk: a riposo sul bordo / parlato semplificato.
    */
   _setArt(state) {
-    const src = poseUrl(ART[state]);
+    this._setSrc(poseUrl(ART[state]));
+  }
+
+  _setSrc(src) {
     if (this.img.getAttribute('src') !== src) this.img.src = src;
   }
 
-  /* Riallinea l'immagine allo stato corrente (dopo un drag o un tap). */
+  /* Riallinea l'immagine allo stato corrente (dopo un drag o un tap). L'umore
+     vince sulla posa di riposo, mai sul parlato (v. _moodPose). */
   _syncArt() {
     if (this._talk.timer) return; // il frame lo gestisce l'animatore del parlato
+    const mood = this._moodPose();
+    if (mood) {
+      this._setSrc(poseUrl(MOOD_ART[mood]));
+      return;
+    }
     if (this.el.classList.contains('thinking')) {
       this._setArt('think');
       return;
@@ -315,17 +360,98 @@ export class JennyCompanion {
     this._agentState = state;
     const docked = this.mode === 'chat' && !this.el.classList.contains('out');
 
+    // Un turno che riparte rende stantia la faccia del turno prima: una
+    // risposta neutra non manderebbe niente e la vecchia faccia riapparirebbe a
+    // parlato finito. La preoccupazione del pensa lungo nasce DOPO questo
+    // azzeramento (timer), quindi sopravvive.
+    if (state !== 'idle') this._clearMood();
     if (state === 'talking') {
       this.el.classList.remove('thinking');
+      this._disarmWorry();
       this._noteTalkActivity();
     } else if (state === 'thinking') {
       if (!docked) this.el.classList.add('thinking');
       this._stopTalk();
+      this._armWorry();
     } else {
       this.el.classList.remove('thinking');
+      this._disarmWorry();
       this._stopTalk();
     }
     this._syncArt();
+  }
+
+  /* ── Umore ── */
+
+  /* Il frame `mascot_mood` del backend. Accettato solo se è la reazione
+     all'ultimo turno chiuso e nessun altro turno è in corso: una faccia per
+     una risposta che non è più l'ultima confonderebbe più di nessuna faccia. */
+  _onMoodFrame(msg) {
+    if (!this._acceptMood(msg)) return;
+    this._applyMood(msg.mood);
+  }
+
+  _acceptMood(msg) {
+    if (!msg || !Object.prototype.hasOwnProperty.call(MOOD_ART, msg.mood)) return false;
+    if (this._turnActive || this._pendingTurn) return false;
+    const turnId = msg.turn_id || msg.turnId || null;
+    if (turnId && this._lastClosedTurnId && turnId !== this._lastClosedTurnId) return false;
+    return true;
+  }
+
+  /* Ricorda quale turno si è chiuso: è il metro con cui _acceptMood giudica il
+     frame che arriva dopo. Un frame di chiusura senza id (retry) vale per il
+     turno che stava seguendo. */
+  _noteTurnClosed(msg) {
+    this._lastClosedTurnId = msg.turn_id || msg.turnId || this._streamTurnId || null;
+  }
+
+  _applyMood(mood, now = performance.now()) {
+    if (MOOD_STANDBY) return;
+    if (!Object.prototype.hasOwnProperty.call(MOOD_ART, mood)) return;
+    this._mood = mood;
+    this._moodUntil = now + MOOD_HOLD_MS;
+    if (this._moodTimer) clearTimeout(this._moodTimer);
+    this._moodTimer = setTimeout(() => this._clearMood(), MOOD_HOLD_MS);
+    this._syncArt();
+  }
+
+  _clearMood() {
+    if (this._moodTimer) {
+      clearTimeout(this._moodTimer);
+      this._moodTimer = null;
+    }
+    if (!this._mood) return;
+    this._mood = null;
+    this._moodUntil = 0;
+    this._syncArt();
+  }
+
+  /* La posa d'umore da mostrare adesso, o null. Solo a mascotte intera
+     (`out`: da `side` una faccia a metà non si legge, e resta in attesa se la
+     si richiama entro il tempo), mai in volo, e durante il pensa solo la
+     preoccupazione — che del pensa lungo è la faccia. */
+  _moodPose(now = performance.now()) {
+    if (!this._mood || now >= this._moodUntil) return null;
+    const cl = this.el.classList;
+    if (!cl.contains('out') || cl.contains('flying')) return null;
+    if (cl.contains('thinking') && this._mood !== 'worried') return null;
+    return this._mood;
+  }
+
+  _armWorry() {
+    if (this._worryTimer) return;
+    this._worryTimer = setTimeout(() => {
+      this._worryTimer = null;
+      if (this._agentState === 'thinking') this._applyMood('worried');
+    }, MOOD_WORRY_AFTER_MS);
+  }
+
+  _disarmWorry() {
+    if (this._worryTimer) {
+      clearTimeout(this._worryTimer);
+      this._worryTimer = null;
+    }
   }
 
   /* ── Parlato animato ── */
@@ -986,6 +1112,12 @@ export class JennyCompanion {
     // stessa con cui la chat decide cosa rendere.
     const current = sessionManager.currentChatId;
     if (msg.chat_id && current && msg.chat_id !== current) return;
+    // L'umore arriva dopo il turn_end, quando non c'è più niente "a schermo"
+    // che la guardia sotto riconosca: si tratta prima, e in entrambe le viste.
+    if (msg.event === 'mascot_mood') {
+      this._onMoodFrame(msg);
+      return;
+    }
     if (this.mode === 'chat') {
       this._handleChatStream(msg);
       return;
@@ -1050,6 +1182,7 @@ export class JennyCompanion {
       case 'turn_end':
         this._turnActive = false;
         this._pendingTurn = false;
+        this._noteTurnClosed(msg);
         this._streamTurnId = null;
         this.awaiting = false;
         if (this._replyTimer) {
@@ -1063,10 +1196,12 @@ export class JennyCompanion {
       case 'error':
         this._turnActive = false;
         this._pendingTurn = false;
+        this._noteTurnClosed(msg);
         this._streamTurnId = null;
         this.awaiting = false;
         this._showReply(plainText(msg.detail || msg.reason || i18n.t('jenny.genericError')));
         this._setAgentState('idle');
+        this._applyMood('sad'); // livello 0: l'errore ha la sua faccia, gratis
         break;
     }
   }
@@ -1080,6 +1215,7 @@ export class JennyCompanion {
     const current = sessionManager.currentChatId;
     if (detail?.chat_id && current && detail.chat_id !== current) return;
     this._turnActive = true;
+    this._clearMood(); // sta ascoltando, non sta ancora reagendo
     if (!this.el.classList.contains('out')) return; // docked: niente pensa visibile
     this._setAgentState('thinking'); // _syncArt -> think
   }
@@ -1106,6 +1242,7 @@ export class JennyCompanion {
       this._replyTimer = null;
     }
     this._deltaBuffer = '';
+    this._clearMood();
     this._setAgentState('idle');
   }
 
@@ -1177,6 +1314,7 @@ export class JennyCompanion {
         // sta ancora arrivando.
         if (!mine) break;
         this._turnActive = false;
+        this._noteTurnClosed(msg);
         this._streamTurnId = null;
         // Un turno partito dalla minichat e concluso dopo essere passati nella
         // sezione chat: il flag va chiuso anche qui, altrimenti resterebbe
@@ -1184,6 +1322,7 @@ export class JennyCompanion {
         // la vista attiva e riceve lo stream da sé).
         this._pendingTurn = false;
         this._setAgentState('idle');
+        if (msg.event === 'error') this._applyMood('sad'); // livello 0, gratis
         break;
     }
   }

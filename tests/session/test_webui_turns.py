@@ -1,10 +1,9 @@
 """Copertura per ``jenny.session.webui_turns``.
 
 ``tests/webui/test_webui_turn_helpers.py`` copre solo ``publish_turn_run_status``
-(strip di timing). Qui si copre il resto del modulo: marcatura sessione WebUI,
-pulizia titolo generato, selezione input per il titolo, generazione titolo end-to-end
-(incluse le uscite anticipate), e ``WebuiTurnCoordinator`` — il fan-out degli eventi
-runtime verso i messaggi WebSocket della WebUI.
+(strip di timing). Qui si copre il resto del modulo: marcatura sessione WebUI e
+``WebuiTurnCoordinator`` — il fan-out degli eventi runtime verso i messaggi
+WebSocket della WebUI, compresa la proiezione dei turni di altri canali.
 """
 
 from __future__ import annotations
@@ -21,14 +20,9 @@ from jenny.bus.runtime_events import (
     TurnCompleted,
     TurnRunStatusChanged,
 )
-from jenny.cron.session_turns import CRON_HISTORY_META
+from jenny.config.schema import Config
 from jenny.providers.base import LLMResponse
 from jenny.session import webui_turns as wt
-from jenny.session.history_meta import (
-    GOAL_CONTINUE_EVENT,
-    INJECTED_EVENT_META,
-    SUBAGENT_RESULT_EVENT,
-)
 from jenny.session.keys import HEARTBEAT_SESSION_KEY
 from jenny.session.manager import Session, SessionManager
 from jenny.session.turn_visibility import silent_turn_metadata
@@ -48,336 +42,6 @@ def test_mark_webui_session_noop_when_not_opted_in():
     assert wt.mark_webui_session(session, {"webui": False}) is False
     assert wt.mark_webui_session(session, {}) is False
     assert "webui" not in session.metadata
-
-
-# --- clean_generated_title ------------------------------------------------------
-
-
-def test_clean_generated_title_empty_input():
-    assert wt.clean_generated_title(None) == ""
-    assert wt.clean_generated_title("   ") == ""
-
-
-def test_clean_generated_title_strips_prefix_and_quotes():
-    assert wt.clean_generated_title('Title: "Fix the bug"') == "Fix the bug"
-    assert wt.clean_generated_title("标题：修复缺陷") == "修复缺陷"
-
-
-def test_clean_generated_title_collapses_whitespace_and_trailing_punctuation():
-    assert wt.clean_generated_title("Plan   the   trip!") == "Plan the trip"
-    assert wt.clean_generated_title("Fix bug.") == "Fix bug"
-
-
-def test_clean_generated_title_truncates_long_titles():
-    raw = "x" * 100
-    cleaned = wt.clean_generated_title(raw)
-    assert len(cleaned) == wt.TITLE_MAX_CHARS
-    assert cleaned.endswith("…")
-
-
-def test_clean_generated_title_strips_think_blocks():
-    raw = "<think>internal reasoning</think>Final title"
-    assert wt.clean_generated_title(raw) == "Final title"
-
-
-# --- _title_inputs ---------------------------------------------------------------
-
-
-def test_title_inputs_picks_first_user_and_assistant_text():
-    session = Session(key="websocket:c1")
-    session.messages = [
-        {"role": "user", "content": "first question"},
-        {"role": "assistant", "content": "first answer"},
-        {"role": "user", "content": "second question"},
-    ]
-    user_text, assistant_text = wt._title_inputs(session)
-    assert user_text == "first question"
-    assert assistant_text == "first answer"
-
-
-def test_title_inputs_skips_commands_and_cron_turns():
-    session = Session(key="websocket:c1")
-    session.messages = [
-        {"role": "user", "content": "/stop", "_command": True},
-        {"role": "user", "content": "cron ping", CRON_HISTORY_META: True},
-        {"role": "user", "content": "real question"},
-        {"role": "assistant", "content": "real answer"},
-    ]
-    user_text, assistant_text = wt._title_inputs(session)
-    assert user_text == "real question"
-    assert assistant_text == "real answer"
-
-
-def test_title_inputs_skips_injected_rows():
-    """Un rientro di subagent o uno sprone a un goal non titolano la chat.
-
-    Portano ``role: "user"`` come il turno di cron qui sopra, e senza marcatore
-    il titolo della conversazione poteva diventare il prompt di un subagent.
-    """
-    session = Session(key="websocket:c2")
-    session.messages = [
-        {
-            "role": "user",
-            "content": "[Subagent 'x' completed successfully]…",
-            INJECTED_EVENT_META: SUBAGENT_RESULT_EVENT,
-        },
-        {
-            "role": "user",
-            "content": "You have an active sustained goal…",
-            INJECTED_EVENT_META: GOAL_CONTINUE_EVENT,
-        },
-        {"role": "user", "content": "real question"},
-        {"role": "assistant", "content": "real answer"},
-    ]
-    user_text, assistant_text = wt._title_inputs(session)
-    assert user_text == "real question"
-    assert assistant_text == "real answer"
-
-
-def test_title_inputs_ignores_non_string_or_blank_content():
-    session = Session(key="websocket:c1")
-    session.messages = [
-        {"role": "user", "content": None},
-        {"role": "user", "content": "   "},
-        {"role": "user", "content": "actual text"},
-    ]
-    user_text, _assistant_text = wt._title_inputs(session)
-    assert user_text == "actual text"
-
-
-def test_title_inputs_returns_empty_when_no_messages():
-    session = Session(key="websocket:c1")
-    assert wt._title_inputs(session) == ("", "")
-
-
-# --- maybe_generate_webui_title --------------------------------------------------
-
-
-def _make_provider(content: str | None, *, raises: bool = False) -> MagicMock:
-    provider = MagicMock()
-    if raises:
-        provider.chat_with_retry = AsyncMock(side_effect=RuntimeError("boom"))
-    else:
-        provider.chat_with_retry = AsyncMock(
-            return_value=LLMResponse(content=content, finish_reason="stop"),
-        )
-    return provider
-
-
-async def test_maybe_generate_title_false_when_not_webui_session(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider("A title")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-    provider.chat_with_retry.assert_not_awaited()
-
-
-async def test_maybe_generate_title_respects_user_edited_flag(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.metadata[wt.WEBUI_TITLE_USER_EDITED_METADATA_KEY] = True
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider("A title")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-    provider.chat_with_retry.assert_not_awaited()
-
-
-async def test_maybe_generate_title_false_and_unchanged_when_already_clean(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.metadata[wt.WEBUI_TITLE_METADATA_KEY] = "Already clean title"
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider("ignored")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-    provider.chat_with_retry.assert_not_awaited()
-    assert session.metadata[wt.WEBUI_TITLE_METADATA_KEY] == "Already clean title"
-
-
-async def test_maybe_generate_title_normalizes_dirty_current_title_without_llm(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.metadata[wt.WEBUI_TITLE_METADATA_KEY] = "Title: messy title!!"
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider("ignored")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-    provider.chat_with_retry.assert_not_awaited()
-    assert session.metadata[wt.WEBUI_TITLE_METADATA_KEY] == "messy title"
-
-
-async def test_maybe_generate_title_false_without_user_text(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = []
-    provider = _make_provider("A title")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-    provider.chat_with_retry.assert_not_awaited()
-
-
-async def test_maybe_generate_title_success_persists_cleaned_title(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = [
-        {"role": "user", "content": "how do I fix this bug"},
-        {"role": "assistant", "content": "here is the fix"},
-    ]
-    provider = _make_provider('"Fix the bug."')
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is True
-    provider.chat_with_retry.assert_awaited_once()
-    assert session.metadata[wt.WEBUI_TITLE_METADATA_KEY] == "Fix the bug"
-    # Persistito su disco: una nuova SessionManager legge lo stesso titolo.
-    reloaded = SessionManager(tmp_path).get_or_create("websocket:c1")
-    assert reloaded.metadata[wt.WEBUI_TITLE_METADATA_KEY] == "Fix the bug"
-
-
-async def test_maybe_generate_title_false_on_provider_exception(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider(None, raises=True)
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-
-
-async def test_maybe_generate_title_false_when_response_is_error_like(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider("Error calling LLM: boom")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-
-
-async def test_maybe_generate_title_false_when_response_empty(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = [{"role": "user", "content": "hi"}]
-    provider = _make_provider("   ")
-
-    generated = await wt.maybe_generate_webui_title(
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-
-
-# --- maybe_generate_webui_title_after_turn ---------------------------------------
-
-
-async def test_maybe_generate_title_after_turn_false_for_non_websocket_channel(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("cli:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    provider = _make_provider("A title")
-
-    generated = await wt.maybe_generate_webui_title_after_turn(
-        channel="cli",
-        metadata={"webui": True},
-        sessions=sessions,
-        session_key="cli:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-    provider.chat_with_retry.assert_not_awaited()
-
-
-async def test_maybe_generate_title_after_turn_false_when_metadata_not_webui(tmp_path):
-    sessions = SessionManager(tmp_path)
-    provider = _make_provider("A title")
-
-    generated = await wt.maybe_generate_webui_title_after_turn(
-        channel="websocket",
-        metadata={"webui": False},
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is False
-
-
-async def test_maybe_generate_title_after_turn_delegates_when_eligible(tmp_path):
-    sessions = SessionManager(tmp_path)
-    session = sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = [{"role": "user", "content": "hello there"}]
-    provider = _make_provider("Generated title")
-
-    generated = await wt.maybe_generate_webui_title_after_turn(
-        channel="websocket",
-        metadata={"webui": True},
-        sessions=sessions,
-        session_key="websocket:c1",
-        provider=provider,
-        model="m",
-    )
-    assert generated is True
-    provider.chat_with_retry.assert_awaited_once()
 
 
 # --- WebuiTurnCoordinator ----------------------------------------------------------
@@ -484,33 +148,31 @@ async def test_handle_turn_end_noop_for_non_websocket_channel(tmp_path):
     bus.publish_outbound.assert_not_awaited()
 
 
-async def test_handle_turn_completed_event_schedules_title_from_event_runtime(tmp_path):
+async def test_handle_turn_completed_event_publishes_turn_end_and_schedules_nothing(tmp_path):
+    """La fine di un turno WebUI è un solo frame, e nessun lavoro in background.
+
+    Fino al 05/09/2026 qui partiva la generazione del titolo di sessione: una
+    richiesta al modello dopo ogni turno finché il titolo non c'era, per un campo
+    che nessuna vista leggeva. ``TurnCompleted.runtime`` resta sull'evento (è la
+    foto del provider/modello del turno) ma il coordinatore non lo consuma più.
+    """
     coordinator, bus, scheduled = _coordinator(tmp_path)
-
-    session = coordinator.sessions.get_or_create("websocket:c1")
-    session.metadata[wt.WEBUI_SESSION_METADATA_KEY] = True
-    session.messages = [{"role": "user", "content": "hello there"}]
-
-    provider = _make_provider("Event Title")
-    runtime = LLMRuntime(provider=provider, model="m")
     ctx = RuntimeEventContext(
         channel="websocket",
         chat_id="c1",
         session_key="websocket:c1",
         metadata={"webui": True},
     )
-    event = TurnCompleted(context=ctx, latency_ms=75, runtime=runtime)
+    event = TurnCompleted(context=ctx, latency_ms=75, runtime=MagicMock())
 
     await coordinator._handle_turn_completed_event(event)
 
-    assert len(scheduled) == 1
-    await scheduled[0]
-    assert session.metadata[wt.WEBUI_TITLE_METADATA_KEY] == "Event Title"
-
-    # La notifica outbound al client deve annunciare l'aggiornamento della metadata di sessione.
-    notify = bus.publish_outbound.await_args_list[-1][0][0]
-    assert notify.metadata["_session_updated"] is True
-    assert notify.metadata["_session_update_scope"] == "metadata"
+    assert scheduled == []
+    bus.publish_outbound.assert_awaited_once()
+    out = bus.publish_outbound.await_args[0][0]
+    assert out.metadata["_turn_end"] is True
+    assert out.metadata["latency_ms"] == 75
+    assert not out.metadata.get("_session_updated")
 
 
 async def test_handle_turn_completed_event_ignores_non_websocket(tmp_path):
@@ -523,18 +185,168 @@ async def test_handle_turn_completed_event_ignores_non_websocket(tmp_path):
     assert scheduled == []
 
 
-async def test_schedule_title_update_from_event_skips_when_runtime_not_llm_runtime(tmp_path):
+# --- il sidecar dell'umore della mascotte -------------------------------------------
+
+_REPLY = "Fatto: ho spostato la riunione alle 16 e avvisato tutti. Spero vada bene!"
+
+
+def _mood_coordinator(tmp_path, *, config: Config | None = None, letter: str = "A"):
     coordinator, bus, scheduled = _coordinator(tmp_path)
+    on = Config.model_validate({"agents": {"defaults": {"mascotMood": True}}})
+    coordinator.config_loader = lambda: config if config is not None else on
+    session = coordinator.sessions.get_or_create("websocket:c1")
+    session.add_message("user", "sposta la riunione")
+    session.add_message("assistant", _REPLY)
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content=letter, usage={"total_tokens": 5})
+    )
     ctx = RuntimeEventContext(
         channel="websocket",
         chat_id="c1",
         session_key="websocket:c1",
-        metadata={"webui": True},
+        metadata={"webui": True, "webui_turn_id": "t-1"},
     )
-    event = TurnCompleted(context=ctx, latency_ms=10, runtime="not-a-runtime")
+    event = TurnCompleted(
+        context=ctx, latency_ms=10, runtime=LLMRuntime(provider=provider, model="turn-model")
+    )
+    return coordinator, bus, scheduled, provider, event
+
+
+async def _run_scheduled(scheduled: list) -> None:
+    for coro in scheduled:
+        await coro
+
+
+async def test_turn_completed_schedules_the_mood_and_publishes_the_frame(tmp_path, monkeypatch):
+    recorded: list = []
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage",
+        lambda response, **kw: recorded.append((response, kw)),
+    )
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, letter="A")
 
     await coordinator._handle_turn_completed_event(event)
+
+    # Il gestore pubblica solo il ``turn_end``: il resto e' nel background.
+    assert bus.publish_outbound.await_count == 1
+    assert len(scheduled) == 1
+    await _run_scheduled(scheduled)
+
+    provider.chat_with_retry.assert_awaited_once()
+    assert provider.chat_with_retry.await_args.kwargs["model"] == "turn-model"
+    frame = bus.publish_outbound.await_args_list[-1][0][0]
+    assert frame.channel == "websocket" and frame.chat_id == "c1" and frame.content == ""
+    assert frame.metadata["_mascot_mood"] is True
+    assert frame.metadata["mascot_mood"] == "happy"
+    assert frame.metadata["webui_turn_id"] == "t-1"
+    # Contato, nel suo bucket: il titolo che questo sostituisce non lo era.
+    assert len(recorded) == 1
+    assert recorded[0][1]["source"] == "mascot"
+
+
+async def test_neutral_mood_publishes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
+    )
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, letter="E")
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_awaited_once()
+    assert bus.publish_outbound.await_count == 1  # solo il turn_end
+
+
+async def test_provider_failure_leaves_the_mascot_idle(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+    provider.chat_with_retry = AsyncMock(side_effect=RuntimeError("boom"))
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_default_config_is_standby_and_costs_no_request(tmp_path):
+    """Con ``Config()`` nudo il sidecar non parte: e' lo stato in cui si spedisce."""
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=Config())
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_mood_disabled_in_config_costs_no_request(tmp_path):
+    config = Config.model_validate({"agents": {"defaults": {"mascotMood": False}}})
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=config)
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_mood_uses_the_configured_preset_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
+    )
+    config = Config.model_validate({
+        "agents": {"defaults": {"mascotMood": True, "mascotMoodModelPreset": "cheap"}},
+        "modelPresets": {"cheap": {"model": "tiny-1"}},
+    })
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=config)
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    assert provider.chat_with_retry.await_args.kwargs["model"] == "tiny-1"
+
+
+async def test_command_turn_has_no_runtime_and_no_mood(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+    event = TurnCompleted(context=event.context, latency_ms=1, runtime=None)
+    await coordinator._handle_turn_completed_event(event)
     assert scheduled == []
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_turn_ended_in_error_costs_no_request(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+    coordinator.sessions.get_or_create("websocket:c1").add_message("user", "riprova")
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+    assert bus.publish_outbound.await_count == 1
+
+
+async def test_unreadable_config_skips_quietly(tmp_path):
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path)
+
+    def _boom():
+        raise OSError("no config")
+
+    coordinator.config_loader = _boom
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+
+
+async def test_telegram_turn_mood_lands_on_the_webui_view(tmp_path, monkeypatch):
+    """Un turno da Telegram e' la stessa conversazione: la mascotte reagisce nella WebUI."""
+    monkeypatch.setattr(
+        "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
+    )
+    coordinator, bus, scheduled = _coordinator(tmp_path)
+    coordinator.config_loader = lambda: Config.model_validate(
+        {"agents": {"defaults": {"mascotMood": True}}}
+    )
+    session = coordinator.sessions.get_or_create("unified:default")
+    session.add_message("user", "sposta la riunione")
+    session.add_message("assistant", _REPLY)
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="D"))
+    event = TurnCompleted(
+        context=_telegram_ctx(), latency_ms=1, runtime=LLMRuntime(provider=provider, model="m")
+    )
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    frame = bus.publish_outbound.await_args_list[-1][0][0]
+    assert (frame.channel, frame.chat_id) == ("websocket", "default")
+    assert frame.metadata["mascot_mood"] == "surprised"
 
 
 # --- proiezione dei turni esterni sulla vista WebUI --------------------------------

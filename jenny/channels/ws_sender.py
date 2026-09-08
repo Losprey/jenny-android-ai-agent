@@ -36,7 +36,7 @@ from jenny.channels.subagent_activity_wire import (
 )
 from jenny.config.runtime_env import ws_send_timeout_s
 from jenny.runtime.notifier import notify_delivery
-from jenny.webui.metadata import WEBUI_DEFAULT_CHAT_ID
+from jenny.webui.metadata import WEBUI_DEFAULT_CHAT_ID, WEBUI_TURN_METADATA_KEY
 
 # Timeout wall-clock per un singolo `connection.send()`. Modulo-level (non
 # per-call) così i test possono monkeypatchare `ws_sender._SEND_TIMEOUT_S` con
@@ -238,6 +238,7 @@ class OutboundSenderMixin:
                 or msg.metadata.get("_turn_end")
                 or msg.metadata.get("_session_updated")
                 or msg.metadata.get("_goal_status")
+                or msg.metadata.get("_mascot_mood")
                 or msg.metadata.get(OUTBOUND_META_SUBAGENT_STATUS) is not None
                 or msg.metadata.get(OUTBOUND_META_SUBAGENT_ACTIVITY) is not None
             ):
@@ -267,6 +268,19 @@ class OutboundSenderMixin:
                 self.logger.warning("subagent activity payload without a usable task_id")
                 return []
             await self.send_subagent_activity(task_id, subagent_activity)
+            return []
+        # L'umore della mascotte: frame dedicato, mai una bolla, mai nel
+        # transcript (un reload riparte da ``idle``: l'umore e' del momento).
+        if msg.metadata.get("_mascot_mood"):
+            if conns:
+                mood = msg.metadata.get("mascot_mood")
+                if isinstance(mood, str) and mood:
+                    turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
+                    await self.send_mascot_mood(
+                        msg.chat_id,
+                        mood,
+                        turn_id=turn_id if isinstance(turn_id, str) and turn_id else None,
+                    )
             return []
         if msg.metadata.get("_goal_status"):
             if conns:
@@ -657,6 +671,29 @@ class OutboundSenderMixin:
         raw = json.dumps(body, ensure_ascii=False)
         # Idempotent refresh-hint: discard pending, no retry (next status replaces it).
         await self._fanout(conns, raw, label=" goal_status ")
+
+    async def send_mascot_mood(
+        self,
+        chat_id: str,
+        mood: str,
+        *,
+        turn_id: str | None = None,
+    ) -> None:
+        """L'umore di Jenny per il turno appena chiuso, agli iscritti della chat.
+
+        Stessa disciplina di ``goal_status``: nessun retry (il turno dopo lo
+        sostituisce) e nessuna persistenza. ``turn_id`` c'e' quando il turno lo
+        aveva; il client lo usa per scartare la reazione a una risposta che non
+        e' piu' l'ultima.
+        """
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {"event": "mascot_mood", "chat_id": chat_id, "mood": mood}
+        if turn_id:
+            body["turn_id"] = turn_id
+        raw = json.dumps(body, ensure_ascii=False)
+        await self._fanout(conns, raw, label=" mascot_mood ")
 
     async def send_subagent_status(self, chat_id: str, payload: Any) -> None:
         """Manda ai client lo snapshot dei subagent (running + terminati recenti).

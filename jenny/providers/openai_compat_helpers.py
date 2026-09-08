@@ -63,6 +63,16 @@ _MIMO_THINKING_MODELS: frozenset[str] = frozenset({
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = DEFAULT_REQUEST_TIMEOUT_S
 _LOCAL_REQUEST_TIMEOUT_S = LOCAL_REQUEST_TIMEOUT_S
 
+# DeepSeek V4: thinking acceso di default (effort ``high``), si spegne con
+# ``{"thinking": {"type": "disabled"}}`` (api-docs.deepseek.com/guides/thinking_mode,
+# letto il 05/09/2026). Senza questa riga ``reasoning_effort="none"`` non
+# mandava niente e una richiesta da 3 token spendeva tutto il budget a pensare:
+# misurato sul telefono con il sidecar dell'umore della mascotte.
+_DEEPSEEK_THINKING_MODELS: frozenset[str] = frozenset({
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+})
+
 # Maps thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
 # merge into extra_body, keeping the style→wire-format mapping in one place.
@@ -74,6 +84,7 @@ _THINKING_STYLE_MAP: dict[str, Any] = {
 _MODEL_THINKING_STYLES: dict[str, str] = {
     **dict.fromkeys(_KIMI_THINKING_MODELS, "thinking_type"),
     **dict.fromkeys(_MIMO_THINKING_MODELS, "thinking_type"),
+    **dict.fromkeys(_DEEPSEEK_THINKING_MODELS, "thinking_type"),
 }
 
 

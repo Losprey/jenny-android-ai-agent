@@ -1,6 +1,5 @@
 """Tests for structured tool-event progress metadata emitted by AgentLoop."""
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -13,8 +12,10 @@ from jenny.agent.progress_events import (
 )
 from jenny.bus.events import InboundMessage
 from jenny.bus.queue import MessageBus
+from jenny.bus.runtime_events import TurnCompleted
 from jenny.providers.base import LLMResponse, ToolCallRequest
 from jenny.session.webui_turns import WebuiTurnCoordinator
+from jenny.utils.llm_runtime import LLMRuntime
 
 
 def _make_loop(tmp_path: Path) -> AgentLoop:
@@ -680,69 +681,15 @@ class TestToolEventProgress:
         assert outbound.index(turn_end_msgs[0]) < outbound.index(statuses[-1])
 
     @pytest.mark.asyncio
-    async def test_webui_title_generation_runs_after_turn_end(self, tmp_path: Path) -> None:
-        bus = MessageBus()
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        title_started = asyncio.Event()
-        release_title = asyncio.Event()
-        calls = 0
+    async def test_webui_turn_spends_exactly_one_request(self, tmp_path: Path) -> None:
+        """Un turno WebUI costa una richiesta al modello, e niente dopo ``turn_end``.
 
-        async def chat_with_retry(*_args: object, **_kwargs: object) -> LLMResponse:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                return LLMResponse(content="Done", tool_calls=[])
-            title_started.set()
-            await release_title.wait()
-            return LLMResponse(content="Generated title", tool_calls=[])
-
-        provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
-        _attach_webui_runtime_events(loop, bus)
-        loop.tools.get_definitions = MagicMock(return_value=[])
-        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-
-        await asyncio.wait_for(loop._dispatch(InboundMessage(
-            channel="websocket",
-            sender_id="u1",
-            chat_id="chat1",
-            content="say hello",
-            metadata={"webui": True},
-        )), timeout=0.5)
-
-        outbound: list = []
-        for _ in range(12):
-            outbound.append(await asyncio.wait_for(bus.consume_outbound(), timeout=0.5))
-            if outbound[-1].metadata.get("_turn_end"):
-                break
-        else:
-            raise AssertionError("_turn_end message not found")
-
-        done_with_body = [m for m in outbound if m.content == "Done"]
-        assert len(done_with_body) == 1
-        assert outbound[-1].metadata.get("_turn_end") is True
-
-        await asyncio.wait_for(title_started.wait(), timeout=0.5)
-        release_title.set()
-        session_updated = None
-        for _ in range(10):
-            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
-            if (candidate.metadata or {}).get("_session_updated"):
-                session_updated = candidate
-                break
-        assert session_updated is not None
-
-        assert (session_updated.metadata or {}).get("_session_updated") is True
-        assert (session_updated.metadata or {}).get("_session_update_scope") == "metadata"
-        assert provider.chat_with_retry.await_count == 2
-
-    @pytest.mark.asyncio
-    async def test_webui_title_generation_uses_turn_model_snapshot(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+        Fino al 05/09/2026 ne partiva una seconda in background dopo la chiusura
+        del turno, per generare un titolo di sessione che nessuna vista leggeva.
+        Il turno finisce con il ``_turn_end``; il background non deve accodare
+        altre richieste né altri frame (``_session_updated`` di scope
+        ``metadata`` era l'annuncio di quel titolo).
+        """
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
@@ -751,27 +698,8 @@ class TestToolEventProgress:
         _attach_webui_runtime_events(loop, bus)
         loop.tools.get_definitions = MagicMock(return_value=[])
         loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
-
-        captured: dict[str, object] = {}
-
-        async def fake_title_after_turn(**kwargs: object) -> bool:
-            captured.update(kwargs)
-            return False
-
-        monkeypatch.setattr(
-            "jenny.session.webui_turns.maybe_generate_webui_title_after_turn",
-            fake_title_after_turn,
-        )
-        scheduled_title: list[object] = []
-
-        def schedule_background(coro: object) -> None:
-            name = getattr(coro, "__qualname__", "")
-            if "_generate_title_and_notify" in name:
-                scheduled_title.append(coro)
-            elif hasattr(coro, "close"):
-                coro.close()
-
-        loop._schedule_background = schedule_background  # type: ignore[method-assign]
+        scheduled: list[object] = []
+        loop._schedule_background = scheduled.append  # type: ignore[method-assign]
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -781,21 +709,76 @@ class TestToolEventProgress:
             metadata={"webui": True},
         ))
 
-        assert len(scheduled_title) == 1
-        loop.provider = MagicMock()
-        loop.model = "switched-after-turn"
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
 
-        await scheduled_title[0]  # type: ignore[misc]
-
-        assert captured["provider"] is provider
-        assert captured["model"] == "test-model"
+        assert provider.chat_with_retry.await_count == 1
+        assert [m for m in outbound if m.content == "Done"]
+        assert not [m for m in outbound if m.metadata.get("_session_updated")]
+        for coro in scheduled:
+            name = getattr(coro, "__qualname__", "")
+            assert "title" not in name.lower(), name
+            if hasattr(coro, "close"):
+                coro.close()  # type: ignore[union-attr]
 
     @pytest.mark.asyncio
-    async def test_webui_command_turn_does_not_schedule_title_generation(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    async def test_turn_completed_carries_the_turn_runtime(self, tmp_path: Path) -> None:
+        """``TurnCompleted.runtime`` è il provider/modello **del turno**.
+
+        Lo fotografa ``_state_build`` all'inizio del turno, non lo legge dal loop
+        alla fine: un consumatore in background (oggi nessuno, domani il sidecar
+        della mascotte) che parte dopo un ``/model`` a metà deve parlare con il
+        modello che ha scritto la risposta, non con quello appena scelto.
+        """
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        async def chat_with_retry(*_args: object, **_kwargs: object) -> LLMResponse:
+            # Il turno è già costruito: uno switch qui non deve toccare la foto.
+            loop.provider = MagicMock()
+            loop.model = "switched-mid-turn"
+            return LLMResponse(content="Done", tool_calls=[])
+
+        provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+
+        completed: list[TurnCompleted] = []
+
+        async def on_completed(event: TurnCompleted) -> None:
+            completed.append(event)
+
+        loop.runtime_events.subscribe(on_completed, TurnCompleted)
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata={"webui": True},
+        ))
+
+        assert len(completed) == 1
+        runtime = completed[0].runtime
+        assert isinstance(runtime, LLMRuntime)
+        assert runtime.provider is provider
+        assert runtime.model == "test-model"
+
+    @pytest.mark.asyncio
+    async def test_webui_command_turn_completes_without_runtime(self, tmp_path: Path) -> None:
+        """Un turno-comando (``/model``) chiude con ``TurnCompleted``, ma senza ``runtime``.
+
+        Il comando prende la scorciatoia in ``COMMAND`` e ``_state_build`` non gira
+        mai, quindi nessuno fotografa provider/modello: ``runtime`` resta ``None``.
+        È **il** segnale per un consumatore in background dell'evento — era la
+        guardia del vecchio generatore di titoli, sarà quella del sidecar della
+        mascotte — e il test lo fissa perché misurato il 05/09/2026: l'ipotesi
+        "i comandi non emettono l'evento" era falsa.
+        """
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
@@ -803,15 +786,12 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
 
-        async def fake_title_after_turn(**_kwargs: object) -> bool:
-            raise AssertionError("command-only turns should not generate titles")
+        completed: list[TurnCompleted] = []
 
-        monkeypatch.setattr(
-            "jenny.session.webui_turns.maybe_generate_webui_title_after_turn",
-            fake_title_after_turn,
-        )
-        scheduled: list[object] = []
-        loop._schedule_background = scheduled.append  # type: ignore[method-assign]
+        async def on_completed(event: TurnCompleted) -> None:
+            completed.append(event)
+
+        loop.runtime_events.subscribe(on_completed, TurnCompleted)
 
         await loop._dispatch(InboundMessage(
             channel="websocket",
@@ -821,7 +801,9 @@ class TestToolEventProgress:
             metadata={"webui": True},
         ))
 
-        assert scheduled == []
+        assert len(completed) == 1
+        assert completed[0].runtime is None
+        provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_non_websocket_dispatch_does_not_publish_turn_end_marker(self, tmp_path: Path) -> None:

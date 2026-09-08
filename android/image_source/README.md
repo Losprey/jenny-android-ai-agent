@@ -96,6 +96,12 @@ Gli stati "in posizione" (`mobile-jenny.js`):
 - **side / side-talk**: riposo sul bordo, metà fuori schermo; da lì il
   parlato è la versione semplificata `side↔side-talk` (posa unica).
 
+L'**umore** (frame `mascot_mood`, v. `MOOD_ART` in `mobile-jenny.js`) al
+momento **non ha sorgenti propri**: ogni etichetta (`happy`, `sad`, `worried`,
+`surprised`) prende in prestito una posa qui sopra. Quando arriveranno le pose
+dedicate andranno cablate come tutte le altre (`FILES`, `_UI_MANIFEST`, `ART`) e
+`MOOD_ART` va ripuntata; fino ad allora niente da generare per l'umore.
+
 Le pose `hang`/`fall`/`ground`/`walk1`/`walk2` sono il "volo Pegman" quando
 la mascotte viene trascinata:
 

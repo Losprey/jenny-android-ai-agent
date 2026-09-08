@@ -23,15 +23,7 @@ from jenny.session.turn_continuation import (
     INTERNAL_CONTINUATION_META,
     INTERNAL_CONTINUATION_RUN_STARTED_AT_META,
 )
-from jenny.session.webui_turns import (
-    TITLE_GENERATION_MAX_TOKENS,
-    TITLE_GENERATION_REASONING_EFFORT,
-    WEBUI_SESSION_METADATA_KEY,
-    WEBUI_TITLE_METADATA_KEY,
-    WebuiTurnCoordinator,
-    clean_generated_title,
-    maybe_generate_webui_title,
-)
+from jenny.session.webui_turns import WebuiTurnCoordinator
 
 # La chiave esplicita del turno, diversa da quella della chat: serve a un solo
 # test, che controlla che il goal di una chat non finisca nel contesto di
@@ -176,112 +168,6 @@ async def test_injected_subagent_result_is_marked_in_history(tmp_path: Path) -> 
     typed = [m for m in session.messages if m.get("content") == "com'è andato il backup?"]
     assert len(typed) == 1
     assert is_synthetic_history_row(typed[0]) is False
-
-
-def test_clean_generated_title_strips_reasoning_tags() -> None:
-    assert clean_generated_title("<think>reasoning</think> WebUI polish") == "WebUI polish"
-    assert clean_generated_title("Title: <think> The user said hello") == ""
-
-
-@pytest.mark.asyncio
-async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content='"优化 WebUI 侧边栏。"', finish_reason="stop")
-    )
-    session = loop.sessions.get_or_create("websocket:chat-title")
-    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message("user", "帮我优化一下 webui 的 sidebar")
-    session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
-    loop.sessions.save(session)
-
-    generated = await maybe_generate_webui_title(
-        sessions=loop.sessions,
-        session_key="websocket:chat-title",
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is True
-    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
-    loop.provider.chat_with_retry.assert_awaited_once()
-    assert loop.provider.chat_with_retry.await_args.kwargs["max_tokens"] == TITLE_GENERATION_MAX_TOKENS
-    assert (
-        loop.provider.chat_with_retry.await_args.kwargs["reasoning_effort"]
-        == TITLE_GENERATION_REASONING_EFFORT
-    )
-
-
-@pytest.mark.asyncio
-async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(
-        return_value=LLMResponse(content="Plain websocket title", finish_reason="stop")
-    )
-    session = loop.sessions.get_or_create("websocket:custom-client")
-    session.add_message("user", "hello from a custom websocket client")
-    loop.sessions.save(session)
-
-    generated = await maybe_generate_webui_title(
-        sessions=loop.sessions,
-        session_key="websocket:custom-client",
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_generate_webui_title_ignores_command_only_sessions(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:command-title")
-    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message("user", "/model deep", _command=True)
-    session.add_message(
-        "assistant",
-        "Switched model preset to `deep`.\n- Model: `deepseek-v4-pro`",
-        _command=True,
-    )
-    loop.sessions.save(session)
-
-    generated = await maybe_generate_webui_title(
-        sessions=loop.sessions,
-        session_key="websocket:command-title",
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("websocket:cron-title")
-    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    session.add_message(
-        "user",
-        "Scheduled cron job triggered: 30s-test\n\nInternal reminder prompt",
-        **{CRON_HISTORY_META: True},
-    )
-    session.add_message("assistant", "提醒已经到期。")
-    loop.sessions.save(session)
-
-    generated = await maybe_generate_webui_title(
-        sessions=loop.sessions,
-        session_key="websocket:cron-title",
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is False
-    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_with_retry.assert_not_awaited()
 
 
 def test_save_turn_skips_multimodal_user_when_only_runtime_context() -> None:
