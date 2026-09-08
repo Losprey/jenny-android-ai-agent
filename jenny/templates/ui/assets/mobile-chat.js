@@ -1836,6 +1836,7 @@ export class ChatController {
           const resultStr = typeof ev.result === 'string' ? ev.result : JSON.stringify(ev.result, null, 2);
           if (resultStr && resultStr !== 'null') {
             existing.dataset.result = resultStr;
+            this._markToolExpandable(existing);
           }
         }
       } else if (ev.phase === 'error') {
@@ -1847,11 +1848,16 @@ export class ChatController {
         if (icon) {
           icon.className = `chat-tool-icon error ti ${TOOL_ICONS.error}`;
         }
+        // L'errore e' il *corpo* del chip come lo e' un risultato, non un blocco
+        // a parte: passa da `dataset.result`, quindi nasce chiuso e si apre al
+        // tocco esattamente come gli altri. Appeso al DOM com'era prima restava
+        // espanso per sempre (e il chip nemmeno rispondeva al tocco, perche'
+        // `_toggleToolResult` legge solo `dataset.result`), e un secondo evento
+        // sullo stesso `call_id` ne appendeva una copia; un dataset si sovrascrive.
         if (ev.error) {
-          const errDiv = document.createElement('div');
-          errDiv.className = 'chat-tool-error';
-          errDiv.textContent = ev.error;
-          existing.appendChild(errDiv);
+          existing.dataset.result = String(ev.error);
+          existing.dataset.errored = '1';
+          this._markToolExpandable(existing);
         }
       }
     }
@@ -1861,7 +1867,7 @@ export class ChatController {
     const tool = document.createElement('div');
     tool.className = 'chat-tool';
     tool.dataset.callId = ev.call_id;
-    tool.style.cursor = ev.result != null || ev.phase === 'end' ? 'pointer' : 'default';
+    tool.style.cursor = 'default';
 
     const header = document.createElement('div');
     header.className = 'chat-tool-header';
@@ -1883,6 +1889,15 @@ export class ChatController {
     return tool;
   }
 
+  /* Il chip ha un corpo da mostrare: da qui in poi il tocco fa qualcosa, e il
+     cursore lo dice. Prima era deciso alla creazione, quando un tool avviato non
+     ha ancora ne' risultato ne' errore: un `end` con `result: null` sembrava
+     apribile e non lo era, un tool nato in fase `start` e concluso dopo lo era e
+     non lo sembrava. */
+  _markToolExpandable(tool) {
+    tool.style.cursor = 'pointer';
+  }
+
   _toggleToolResult(tool) {
     let resultEl = tool.querySelector('.tool-result-text');
     if (resultEl) {
@@ -1894,7 +1909,7 @@ export class ChatController {
     if (!resultStr) return;
 
     resultEl = document.createElement('pre');
-    resultEl.className = 'tool-result-text';
+    resultEl.className = 'tool-result-text' + (tool.dataset.errored === '1' ? ' is-error' : '');
     resultEl.textContent = resultStr;
     tool.appendChild(resultEl);
   }

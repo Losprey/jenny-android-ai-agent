@@ -1944,22 +1944,6 @@ body {
   color: var(--text-muted);
 }
 
-.chat-tool-error {
-  width: 100%;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--error);
-  background: var(--bg);
-  border: 0.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  margin-top: 2px;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  word-break: break-word;
-}
-
 /* Markdown content */
 .chat-content {
   font-size: 13px;
@@ -2852,6 +2836,12 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 4px 0 0 0;
+}
+
+/* Stesso riquadro, altro colore: l'errore di un tool e' il corpo del chip come
+   lo e' un risultato, non un blocco a parte. */
+.tool-result-text.is-error {
+  color: var(--error);
 }
 
 /* ── Spinner animation ── */
