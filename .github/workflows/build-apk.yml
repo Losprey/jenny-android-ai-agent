@@ -14,6 +14,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Build debug APK
         working-directory: android
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
