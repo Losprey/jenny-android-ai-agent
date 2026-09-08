@@ -55,11 +55,20 @@ def test_no_asset_path_asks_for_a_color_twin() -> None:
 
 
 def test_every_pose_in_the_manifest_exists_exactly_once() -> None:
-    """15 pose, un file per posa: se ne ricompare una a coppie il conto lo dice."""
-    poses = sorted(e for e in _UI_MANIFEST if e.startswith("assets/jenny-") and e.endswith(".webp"))
+    """Le pose "cotte" sono 15, una per file: se ne ricompare una a coppie il conto lo dice.
+
+    I sorgenti a due livelli (``jenny-body-*`` / ``jenny-face-*``) sono un'altra
+    famiglia e li conta ``test_mascot_layer_sources.py``.
+    """
+    poses = sorted(
+        e for e in _UI_MANIFEST
+        if e.startswith("assets/jenny-") and e.endswith(".webp")
+        and not e.startswith(("assets/jenny-body-", "assets/jenny-face-"))
+    )
     assert len(poses) == 15, poses
-    for entry in poses:
-        assert (ASSETS.parent / entry).is_file(), f"{entry} è nel manifest ma non su disco"
+    for entry in _UI_MANIFEST:
+        if entry.startswith("assets/jenny-") and entry.endswith(".webp"):
+            assert (ASSETS.parent / entry).is_file(), f"{entry} è nel manifest ma non su disco"
 
 
 @node

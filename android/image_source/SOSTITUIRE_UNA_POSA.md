@@ -29,6 +29,12 @@ bisogno di altro.
 | hello1                              | `hello1.PNG`           |
 | hello2                              | `hello2.PNG`           |
 
+Le pose qui sopra sono quelle "cotte", con la faccia disegnata dentro. L'arte
+**a due livelli** (`body_*.PNG` e `face_*.PNG`, corpi senza faccia + facce da
+sola) segue le stesse regole di export e si rigenera con lo stesso comando; la
+mappa dei nomi e quali sono in riserva stanno in
+[`README.md`](./README.md#due-livelli-corpo--faccia).
+
 Fino all'08/09/2026 ogni posa aveva due sorgenti, line-art bianco/nero e
 gemello colore, e a runtime l'utente sceglieva fra le due varianti. La
 preferenza è stata ritirata: resta il colore (v. `.agent/mascot-faces-plan.md`,
@@ -53,8 +59,9 @@ Dalla cartella `android/image_source/`:
 python3 gen_pose_webp.py
 ```
 
-Rigenera **tutti e 15** i webp in `jenny/templates/ui/assets/`, non solo quello
-che hai toccato — è normale e voluto, è idempotente.
+Rigenera **tutti e 24** i webp in `jenny/templates/ui/assets/` (15 pose cotte +
+9 livelli), non solo quello che hai toccato — è normale e voluto, è
+idempotente.
 
 Se vedi `AssertionError: ... atteso canvas 3000x3000, trovato (...)` il
 sorgente che hai salvato non è quadrato 3000×3000: ricontrolla l'export.

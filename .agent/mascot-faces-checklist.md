@@ -8,7 +8,10 @@ Ramo `feat/mascot-faces`, aperto l'08/09/2026 da `main` (004a56b). **Passi 0 e
 1 girati l'08/09/2026**: 9.211 test verdi, lint e pyright puliti. Il B/N è
 uscito senza perdere pose (verificato prima con gli md5: tutte e 15 erano
 davvero colorate) e la guida `COLORARE_LE_POSE.md` è diventata
-`SOSTITUIRE_UNA_POSA.md`, perché di colorare non c'è più niente.
+`SOSTITUIRE_UNA_POSA.md`, perché di colorare non c'è più niente. **Passo 2
+girato l'08/09/2026**: 9.220 test verdi. I 9 livelli pesano 102 kB (64 di corpi,
+38 di facce), e la registrazione ha un test che la misura — due coppie
+ricompongono la posa cotta con scarto massimo 3 e 2 su 255.
 
 Verifica per ogni passo (da `AGENTS.md`, con la correzione locale
 `python3 -m pytest`, non `pytest`):
@@ -49,16 +52,16 @@ fidarsi — quel venv si è già rotto due volte).
 
 ## Passo 2 — i sorgenti nuovi e la pipeline *(un commit, nessun cambio a runtime)*
 
-- [ ] **2.1** 23 PNG da `JENNY_IMG_NEW/` a `android/image_source/` coi nomi
+- [x] **2.1** 23 PNG da `JENNY_IMG_NEW/` a `android/image_source/` coi nomi
       della tabella (i due nomi sporchi corretti, `wave1`/`wave2` incrociati);
       `JENNY_IMG_NEW/` rimossa
-- [ ] **2.2** `gen_pose_webp.py`: tabella `LAYERS`, 9 export
-- [ ] **2.3** `_UI_MANIFEST`: +9
-- [ ] **2.4** `README.md` + `COLORARE_LE_POSE.md`: due livelli, tabella,
+- [x] **2.2** `gen_pose_webp.py`: tabella `LAYERS`, 9 export
+- [x] **2.3** `_UI_MANIFEST`: +9
+- [x] **2.4** `README.md` + `COLORARE_LE_POSE.md`: due livelli, tabella,
       riserva, ricetta della coppia neutra diagonale
-- [ ] **2.5** `tests/webui/test_mascot_layer_sources.py`: esistenza + manifest
+- [x] **2.5** `tests/webui/test_mascot_layer_sources.py`: esistenza + manifest
       + **ricomposizione** dei tre pari cotti (`importorskip("PIL")`)
-- [ ] **2.6** verifica verde; commit `-s`
+- [x] **2.6** verifica verde; commit `-s`
 
 ## Passo 3 — il livello faccia nel client *(un commit, umore ancora fermo)*
 
