@@ -122,22 +122,45 @@ fidarsi — quel venv si è già rotto due volte).
       sulla sua checklist (passo 7 → qui)
 - [x] **6.5** nessun file di `docs/` spostato o rinominato
 
-## Passo 7 — sul telefono *(nessun codice; misure nel piano)*
+## Passo 7 — sul telefono *(girato l'08/09/2026; misure nel piano)*
 
-- [ ] **7.1** APK dal ramo, albero pulito
-- [ ] **7.2** screenshot: idle, pensa, parlato, un umore
-- [ ] **7.3** parlato: bocca a 260 ms, gesto a 2,6 s, **faccia incollata al
-      corpo**
-- [ ] **7.4** specchio: da sinistra e out guarda dentro, alle tre taglie
-- [ ] **7.5** docked identico a prima (confronto con screenshot pre-modifica)
-- [ ] **7.6** volo: nessuna faccia addosso alla pegman
-- [ ] **7.7** zero 404 in logcat dopo la rinomina, anche con `localStorage`
-      che aveva il B/N scelto
-- [ ] **7.8** Impostazioni: la riga dei colori non c'è più, le altre due vanno
-- [ ] **7.9** turno in errore → faccia triste
-- [ ] **7.10** turno da Telegram → la mascotte reagisce nella WebUI
-- [ ] **7.11** onboarding con `workspace/` azzerato: Jenny ha la faccia
+- [x] **7.1** APK **release** dal ramo (il telefono ha la firma release:
+      `installDebug` non passa), albero pulito, `CN=flagDiZero`, contenuto
+      verificato dentro `assets/chaquopy/app.imy`
+- [x] **7.2** screenshot dei quattro stati: riposo, pensa, parlato, felice —
+      e la faccia felice regge anche a +1,5 s
+- [x] **7.3** parlato: 23 scatti su 9,2 s, la bocca alterna e **il gesto pure**
+      — dopo la correzione del passo 7bis; faccia incollata al corpo in tutti
+      e 23 (una sola taglia provata, la Small)
+- [x] **7.4** specchio: out a sinistra è specchiata (ciocca e logo ribaltati),
+      cioè guarda dentro lo schermo
+- [x] **7.5** docked: arte cotta con la sua faccia, mezza visibile, come prima
+- [x] **7.6** volo: la pegman è un'immagine sola, nessuna faccia appiccicata
+      sopra; all'atterraggio torna ai livelli senza lampi
+- [x] **7.7** 19 asset su 19 nominati dal client rispondono **200** dal
+      gateway del telefono; nessun 404 di asset in logcat
+- [x] **7.8** Impostazioni → Personalizzazione: il blocco Mascotte ha due
+      righe, la riga dei colori non c'è più, taglia e visibilità funzionano
+- [ ] **7.9** turno in errore → faccia triste — **non riproducibile
+      dall'esterno**: con le radio spente il fallimento del provider torna
+      come *testo in chat* («Error calling LLM: …»), non come frame `error`,
+      quindi il livello 0 non scatta. Il lato client è coperto dal test node
+      (`_applyMood('sad')` → faccia triste). V. incognite nel piano.
+- [ ] **7.10** turno da Telegram → non fatto: servirebbe mandare un messaggio
+      dal Telegram dell'utente. Coperto dal test del coordinatore.
+- [ ] **7.11** onboarding: non eseguito, richiederebbe azzerare `workspace/`
+      (config, chiavi, cronologia). I 5 asset che usa rispondono 200.
 - [ ] **7.12** PR verso `main` (il merge è dell'utente)
+
+## Passo 7bis — il gesto che non cambiava mai *(trovato sul telefono)*
+
+- [x] **7bis.1** `_setAgentState` tiene viva la bocca a ogni segnale di
+      parlato, non solo al primo: prima, dopo un secondo l'animatore tornava
+      al pensa in mezzo alla frase e ripartiva da `animIdx = 0`, quindi
+      `BODY.hand` era un asset che nessuno poteva vedere. Difetto di prima dei
+      livelli, che i livelli hanno reso visibile.
+- [x] **7bis.2** test che fallisce sull'asserzione (non sulla sintassi) se la
+      riga si toglie; secondo APK e seconda raffica a confermarlo
 
 ## Passo 8 — l'interruttore *(dopo il 7)*
 

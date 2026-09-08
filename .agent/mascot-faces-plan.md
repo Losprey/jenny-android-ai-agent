@@ -371,6 +371,44 @@ c'è qualcosa da spegnere.
 
 ---
 
+## Le misure sul telefono (08/09/2026, Titan 2, APK release dal ramo)
+
+- **Il frame arriva** a **+0,51 s** e **+0,75 s** da `turn_end`, con il
+  `turn_id` che combacia. Su cinque turni guidati dal client WS i verdetti
+  sono stati quattro `happy` e nessun `neutral`.
+- **Tutti gli asset esistono**: i 19 path che il client sa nominare
+  (`mobile-jenny.js` + `mobile-onboarding.js`) rispondono **200** dal gateway
+  del telefono, e in logcat non c'è nessun 404 di asset. La rinomina del
+  passo 1 non ha lasciato niente per strada.
+- **I quattro stati si vedono**: riposo, pensa (corpo del pensa + faccia del
+  pensa), parlato, felice — e la faccia felice regge anche a +1,5 s dal frame.
+- **Le due sveglie del parlato** sono separate e visibili: 23 scatti su 9,2 s
+  di parlato, la bocca alterna e il gesto alterna. Ma **solo dopo una
+  correzione**: v. sotto.
+- **La faccia non si scolla dal corpo** in nessuno dei 23 scatti, né a
+  mascotte specchiata. Il wrapper regge (F8), e con lui lo specchio: out a
+  sinistra la ciocca e il logo sono ribaltati, cioè guarda dentro lo schermo.
+  Provata la taglia Small, non tutte e tre.
+- **Il volo non porta facce addosso**: la pegman è un'immagine sola,
+  all'atterraggio si torna ai livelli senza lampi di posa cotta.
+- **Il blocco Mascotte in Impostazioni ha due righe.**
+
+### Il difetto che il telefono ha trovato
+
+Cercando il braccio alzato non l'ho trovato: 23 scatti su 9 secondi di
+parlato, sempre a braccia giù. Il motivo non era nei livelli. Un flusso lungo
+manda `talking` a *ogni* delta e `_setAgentState` li scartava tutti tranne il
+primo, perché lo stato non cambiava: `lastTextAt` non si aggiornava più, dopo
+un secondo l'animatore decideva che il flusso era muto, tornava al pensa in
+mezzo alla frase e — ripartendo — rimetteva `animIdx` a zero. Il gesto non
+cambiava **mai**, e `BODY.hand` era un asset che nessuno poteva vedere.
+
+È un difetto **di prima dei livelli**: con l'arte vecchia faceva alternare la
+posa fra parlato e pensa circa una volta al secondo, che si leggeva come
+vivacità. Corretto (un segnale di parlato aggiorna `lastTextAt` prima della
+guardia sullo stato invariato), con un test che fallisce sull'asserzione — non
+sulla sintassi — se la riga si toglie.
+
 ## Incognite aperte
 
 - **La distribuzione dei verdetti a quattro lettere.** Con cinque, un giorno
@@ -384,6 +422,13 @@ c'è qualcosa da spegnere.
   Se lo sono, la leva è `MOOD_HOLD_MS`, non l'arte.
 - **La coppia neutra diagonale**, se un giorno si volesse l'umore anche da
   docked: derivabile, ricetta e verifica nel rilievo qui sopra.
+- **Il livello 0 sull'errore forse non scatta mai.** Provato a spegnere le
+  radio del telefono: il fallimento del provider torna come **testo in chat**
+  («Error calling LLM: All connection attempts failed») e non come frame
+  `error`, quindi `_applyMood('sad')` non viene chiamato e la faccia resta
+  normale. La faccia triste ha quindi una sola strada certa, il verdetto `B`
+  del modello. Se la si vuole anche sul fallimento, il gancio è quel messaggio
+  in banda, non l'evento — misurato, non risolto.
 
 ## Fuori da questo giro
 
