@@ -398,9 +398,13 @@ class AgentDefaults(Base):
     # L'umore della mascotte: una richiesta piccola al modello dopo ogni turno
     # WebUI (``jenny/session/mascot_mood.py``). Letti al momento della chiamata,
     # quindi un cambio vale dal turno dopo senza riavvio. Il preset presta solo
-    # il ``model``: il provider resta quello del turno.
+    # il ``model``: il provider resta quello del turno. **Spento di default
+    # (standby, 08/09/2026)**: il meccanismo e' completo e provato sul telefono,
+    # ma l'arte delle espressioni non c'e' ancora e fino ad allora non deve
+    # costare ne' richieste ne' facce prese in prestito. Il client ha il suo
+    # interruttore gemello (``MOOD_STANDBY`` in mobile-jenny.js).
     mascot_mood: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices("mascotMood", "mascot_mood"),
         serialization_alias="mascotMood",
     )

@@ -123,7 +123,16 @@ un force-push.
 - [ ] **5.7** Una giornata d'uso: quota di `neutral` sul totale scritta nel piano
 - [ ] **5.8** PR aperto verso `main` con i passi 1–4 (il merge è dell'utente)
 
-## Passo 6 — l'interruttore *(dopo il 5)*
+## Standby — 08/09/2026
+
+- [x] **S.1** `agents.defaults.mascotMood` default `false`; test e doc aggiornati
+- [x] **S.2** `MOOD_STANDBY = true` in `mobile-jenny.js`, in `_applyMood`; test node
+      con harness a `false` più un test con standby acceso e uno che pinna il valore
+- [x] **S.3** `themes-mascot.md` e `configuration.md` dicono che è spento e perché
+- [ ] **S.4** APK dallo standby sul telefono: un turno, nessun frame, bucket
+      `mascot` fermo, mascotte in `idle`
+
+## Passo 6 — l'interruttore *(dopo il 5; in standby non ha senso finché il 7 non c'è)*
 
 - [ ] **6.1** Riga backend "Espressioni" in Personalizzazione → Mascotte, via
       `store.mutate()`, con la nota "finisce in config.json e nel backup"
@@ -131,7 +140,7 @@ un force-push.
 - [ ] **6.3** `docs/reference/settings.md`
 - [ ] **6.4** Test route + verifica verde; commit `-s`
 
-## Passo 7 — l'arte *(indipendente dal 6; fuori da questo PR per decisione del 05/09)*
+## Passo 7 — l'arte *(indipendente dal 6; fuori da questo PR per decisione del 05/09; è ciò che chiude lo standby)*
 
 - [ ] **7.1** 8 PNG 3000×3000 in `android/image_source/` (`mood_<x>.PNG` + `_color`)
 - [ ] **7.2** `gen_pose_webp.py::FILES` (+4), rigenerato

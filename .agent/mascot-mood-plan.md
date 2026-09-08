@@ -365,6 +365,38 @@ neutri su una giornata.
 
 ---
 
+## Standby (08/09/2026)
+
+Deciso dall'utente dopo la prova sul telefono: **finché le espressioni non sono
+disegnate, l'umore non deve avere nessun effetto visivo** — né le facce prese in
+prestito, né le reazioni gratis del livello 0. Il meccanismo resta intero e
+provato; si spegne in due punti gemelli, e riaccenderlo è togliere due valori:
+
+- backend: `agents.defaults.mascotMood` ha default **`false`** (era `true`).
+  Niente richiesta, niente frame, niente token. Chi lo mette a `true` in
+  `config.json` paga una richiesta per turno e non vede niente, perché…
+- client: `MOOD_STANDBY = true` in `mobile-jenny.js`, letto da `_applyMood`,
+  l'unico punto da cui passa ogni cambio di posa per umore (frame e livello 0).
+  Un test pinna che il valore spedito sia `true`; l'harness dei test node lo
+  mette a `false` per misurare il meccanismo.
+
+Per uscire dallo standby: default a `true`, `MOOD_STANDBY = false`, il test
+`test_the_shipped_switch_is_standby` rovesciato, e l'arte del passo 7 al posto
+della mappa provvisoria. La pagina utente e `configuration.md` dicono già che è
+spento e perché.
+
+## Dopo: il parlato espressivo (idea registrata, non pianificata)
+
+Chiesto l'08/09: "c'è parla felice / parla triste?". No: l'umore vale a riposo,
+perché il sidecar legge la risposta completa dopo il `turn_end`. Per averlo
+mentre parla servono due cose: sapere l'umore prima che finisca — la strada che
+non tocca l'agente è **classificare a metà flusso**, al primo pezzo di risposta
+oltre ~120 caratteri, stessa richiesta da una lettera ma sulla testa invece che
+sulla coda (4–5 s di risposta contro 0,5 s di verdetto: il resto del parlato lo
+fa con la faccia giusta; il prezzo è che il tono sta spesso in coda) — e l'arte
+del parlato per umore: una posa per umore × 2 bocche × 2 varianti = 16 file,
+oltre alle 8 a riposo. Da riaprire come piano suo, dopo il passo 7.
+
 ## Incognite aperte
 
 - ~~Il pannello Uso token enumera i bucket o li itera?~~ Nessuna delle due: mostra

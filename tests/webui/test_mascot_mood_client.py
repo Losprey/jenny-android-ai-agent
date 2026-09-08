@@ -54,7 +54,9 @@ def _mood_art(source: str) -> dict[str, str]:
     return dict(re.findall(r"(\w+):\s*'([^']+)'", block))
 
 
-def _harness() -> str:
+def _harness(*, standby: bool = False) -> str:
+    # Lo standby lo si spegne nell'harness: qui si misura il meccanismo. Un test
+    # a parte lo accende e pretende che non cambi niente.
     jenny = JENNY_JS.read_text(encoding="utf-8")
     methods = "\n".join(
         _method(jenny, name) + ","
@@ -72,6 +74,7 @@ def _harness() -> str:
     return f"""
 import assert from 'node:assert/strict';
 
+const MOOD_STANDBY = {"true" if standby else "false"};
 const MOOD_ART = {_const(jenny, "MOOD_ART")};
 const MOOD_HOLD_MS = {_const(jenny, "MOOD_HOLD_MS")};
 const MOOD_WORRY_AFTER_MS = {_const(jenny, "MOOD_WORRY_AFTER_MS")};
@@ -101,8 +104,8 @@ function makeMascot(...classes) {{
 """
 
 
-def _run_js(script: str) -> None:
-    source = _harness() + script
+def _run_js(script: str, *, standby: bool = False) -> None:
+    source = _harness(standby=standby) + script
     proc = subprocess.run(
         [str(_NODE), "--input-type=module", "-e", source],
         capture_output=True,
@@ -240,6 +243,25 @@ def test_the_worry_timer_arms_once_and_disarms_cleanly() -> None:
       assert.equal(m._worryTimer, null);
       m._disarmWorry();
     """)
+
+
+@node
+def test_standby_changes_nothing_from_any_source() -> None:
+    """Con MOOD_STANDBY acceso né il frame né il livello 0 toccano la posa."""
+    _run_js("""
+      const m = makeMascot('out');
+      m._noteTurnClosed({ event: 'turn_end', turn_id: 'webui:A' });
+      m._onMoodFrame({ event: 'mascot_mood', mood: 'happy', turn_id: 'webui:A' });
+      m._applyMood('sad');
+      assert.equal(m._mood, null);
+      assert.equal(m._moodPose(), null);
+      assert.equal(m.syncs, 0, 'in standby non si ridisegna niente');
+    """, standby=True)
+
+
+def test_the_shipped_switch_is_standby() -> None:
+    """Pinna lo stato in cui si spedisce: si toglie quando l'arte c'e'."""
+    assert _const(JENNY_JS.read_text(encoding="utf-8"), "MOOD_STANDBY") == "true"
 
 
 # ── Il contratto con il backend ────────────────────────────────────────────────

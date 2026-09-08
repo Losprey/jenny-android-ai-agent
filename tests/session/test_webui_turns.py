@@ -192,7 +192,8 @@ _REPLY = "Fatto: ho spostato la riunione alle 16 e avvisato tutti. Spero vada be
 
 def _mood_coordinator(tmp_path, *, config: Config | None = None, letter: str = "A"):
     coordinator, bus, scheduled = _coordinator(tmp_path)
-    coordinator.config_loader = lambda: config if config is not None else Config()
+    on = Config.model_validate({"agents": {"defaults": {"mascotMood": True}}})
+    coordinator.config_loader = lambda: config if config is not None else on
     session = coordinator.sessions.get_or_create("websocket:c1")
     session.add_message("user", "sposta la riunione")
     session.add_message("assistant", _REPLY)
@@ -263,6 +264,15 @@ async def test_provider_failure_leaves_the_mascot_idle(tmp_path):
     assert bus.publish_outbound.await_count == 1
 
 
+async def test_default_config_is_standby_and_costs_no_request(tmp_path):
+    """Con ``Config()`` nudo il sidecar non parte: e' lo stato in cui si spedisce."""
+    coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=Config())
+    await coordinator._handle_turn_completed_event(event)
+    await _run_scheduled(scheduled)
+    provider.chat_with_retry.assert_not_awaited()
+    assert bus.publish_outbound.await_count == 1
+
+
 async def test_mood_disabled_in_config_costs_no_request(tmp_path):
     config = Config.model_validate({"agents": {"defaults": {"mascotMood": False}}})
     coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=config)
@@ -277,7 +287,7 @@ async def test_mood_uses_the_configured_preset_model(tmp_path, monkeypatch):
         "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
     )
     config = Config.model_validate({
-        "agents": {"defaults": {"mascotMoodModelPreset": "cheap"}},
+        "agents": {"defaults": {"mascotMood": True, "mascotMoodModelPreset": "cheap"}},
         "modelPresets": {"cheap": {"model": "tiny-1"}},
     })
     coordinator, bus, scheduled, provider, event = _mood_coordinator(tmp_path, config=config)
@@ -321,7 +331,9 @@ async def test_telegram_turn_mood_lands_on_the_webui_view(tmp_path, monkeypatch)
         "jenny.agent.token_usage.record_response_token_usage", lambda *a, **kw: None
     )
     coordinator, bus, scheduled = _coordinator(tmp_path)
-    coordinator.config_loader = Config
+    coordinator.config_loader = lambda: Config.model_validate(
+        {"agents": {"defaults": {"mascotMood": True}}}
+    )
     session = coordinator.sessions.get_or_create("unified:default")
     session.add_message("user", "sposta la riunione")
     session.add_message("assistant", _REPLY)

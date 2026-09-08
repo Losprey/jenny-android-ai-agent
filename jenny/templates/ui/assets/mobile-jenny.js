@@ -63,6 +63,11 @@ const MOOD_ART = {
   worried: '/html-mobile/assets/jenny-think.webp', // provvisoria: la posa del pensa
   surprised: '/html-mobile/assets/jenny-talk1a.webp', // provvisoria: bocca aperta
 };
+/* STANDBY (08/09/2026): con `true` nessuna posa cambia mai per l'umore — né dal
+   frame `mascot_mood`, né dal livello 0 (errore, attesa lunga). Tutto passa da
+   _applyMood, che qui si ferma. Gemello lato backend: `agents.defaults.mascotMood`
+   spento di default. Si riaccende quando le espressioni saranno disegnate. */
+const MOOD_STANDBY = true;
 const MOOD_HOLD_MS = 12000; // quanto dura una faccia prima di tornare idle
 /* Livello 0, gratis: un pensa che dura più di così diventa preoccupata, senza
    chiedere niente a nessuno. Si disarma al primo frame che cambia stato. */
@@ -402,6 +407,7 @@ export class JennyCompanion {
   }
 
   _applyMood(mood, now = performance.now()) {
+    if (MOOD_STANDBY) return;
     if (!Object.prototype.hasOwnProperty.call(MOOD_ART, mood)) return;
     this._mood = mood;
     this._moodUntil = now + MOOD_HOLD_MS;
