@@ -226,6 +226,8 @@ export class ChatController {
     this._subagentSnapshot = { running: [], recent: [] };
     this._subagentsOpen = false;
     this._subagentPollTimer = null;
+    // Sveglia dell'ultimo ri-render di una card terminale (v. _scheduleSubagentExpiry).
+    this._subagentExpiryTimer = null;
     this._lastStalledIds = '';
     // Task id visti *vivi* in questo turno. È il filtro che tiene il pannello
     // sul lavoro vivo: una voce terminale si mostra solo se la sua transizione
@@ -2022,10 +2024,13 @@ export class ChatController {
 
      Il pannello mostra il LAVORO VIVO, non lo storico. Una card terminale resta
      per il turno corrente — così la transizione si vede — e sparisce a
-     `turn_end`; niente di un turno passato viene mai renderizzato, nemmeno
-     dopo un reload (il filtro sta in shared/subagent-policy.js). Il duplicato
-     era doppio danno: l'esito è già riassunto dall'orchestratore nella chat, e
-     una card recente occupava spazio sopra il composer per sempre.
+     `turn_end`, o al più tardi alla propria scadenza di orologio, perché
+     `turn_end` è un frame live che a un client in Doze non arriva mai
+     (v. SA_LINGER_MS); niente di un turno passato viene mai renderizzato,
+     nemmeno dopo un reload (il filtro sta in shared/subagent-policy.js). Il
+     duplicato era doppio danno: l'esito è già riassunto dall'orchestratore
+     nella chat, e una card recente occupava spazio sopra il composer per
+     sempre.
 
      Le due cose che il pannello deve rendere ovvie sono `idle` (fermo ≠ al
      lavoro) e Stop. Con più di un subagent le card stanno su UNA riga che scorre
@@ -2133,6 +2138,7 @@ export class ChatController {
     this._subagentLiveIds = view.liveIds;
     const lingering = view.lingering;
     const total = running.length + lingering.length;
+    this._scheduleSubagentExpiry(view.nextExpiryMs);
 
     // Zero card = pannello assente, non pannello chiuso: sopra il composer
     // nemmeno i 34px dell'header collassato sono gratis.
@@ -2189,6 +2195,30 @@ export class ChatController {
   _dropTerminatedSubagents() {
     this._subagentLiveIds = new Set();
     this._renderSubagents(this._subagentSnapshot);
+  }
+
+  /* L'ultimo ri-render di una card terminale: quello che la fa sparire quando
+     `turn_end` non arriva (v. SA_LINGER_MS). Un timer solo, riarmato a ogni
+     render sulla prima scadenza, perché è l'unico evento che resta — il poll a
+     zero running è spento per scelta, e senza sveglia la scadenza sarebbe una
+     regola che nessuno applica.
+
+     Il timer non chiede niente al gateway: ri-renderizza lo snapshot che si ha
+     già, così una card scaduta cade anche offline. Se Android ha strozzato il
+     timer mentre la vista era nascosta, al ritorno in foreground il
+     visibilitychange fa comunque una lettura. */
+  _scheduleSubagentExpiry(nextExpiryMs) {
+    if (this._subagentExpiryTimer) {
+      clearTimeout(this._subagentExpiryTimer);
+      this._subagentExpiryTimer = null;
+    }
+    if (!Number.isFinite(nextExpiryMs)) return;
+    // +50ms: un timer che scatta *sul* confine trova la card ancora fresca di
+    // un millisecondo e si riarma a zero, in un ciclo che non finisce.
+    this._subagentExpiryTimer = setTimeout(() => {
+      this._subagentExpiryTimer = null;
+      this._renderSubagents(this._subagentSnapshot);
+    }, Math.max(0, nextExpiryMs) + 50);
   }
 
   /* Traduzione con fallback sul valore grezzo: phase e state arrivano dal
