@@ -150,7 +150,7 @@ fidarsi — quel venv si è già rotto due volte).
       dal Telegram dell'utente. Coperto dal test del coordinatore.
 - [ ] **7.11** onboarding: non eseguito, richiederebbe azzerare `workspace/`
       (config, chiavi, cronologia). I 5 asset che usa rispondono 200.
-- [ ] **7.12** PR verso `main` (il merge è dell'utente)
+- [x] **7.12** PR [#34](https://github.com/flagdizero/jenny-android-ai-agent/pull/34) verso `main` (il merge è dell'utente)
 
 ## Passo 7bis — il gesto che non cambiava mai *(trovato sul telefono)*
 
