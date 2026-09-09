@@ -17,6 +17,7 @@ const LEGACY_SIDE_KEY = 'jenny-mascotte-side';
 const COLOR_KEY = 'jenny-mascotte-color';
 const SIZE_KEY = 'jenny-mascotte-size';
 const HAPTICS_KEY = 'jenny-mascotte-haptics'; // batch 4: vibrazione overlay
+const AUTOPARK_KEY = 'jenny-mascotte-autopark'; // batch 5: AutoPark overlay
 
 /** Lato del canvas quadrato per ogni taglia. Il default è 'sm'; la geometria
  *  in mobile-style.css deriva tutta da --jenny-size, quindi qui basta
@@ -85,6 +86,23 @@ export function mascotHaptics() {
 
 export function setMascotHaptics(on) {
   localStorage.setItem(HAPTICS_KEY, on ? '1' : '0');
+  return !!on;
+}
+
+/** Parcheggio automatico dell'overlay pet (batch 5): con AutoPark attivo la
+ *  mascotte che si ferma in fascia di bordo si parcheggia mezza nascosta e
+ *  fa capolino (peek). Preferenza client-side come le altre (localStorage);
+ *  il controller nativo la legge dal suo pref overlay/autoPark, mantenuto
+ *  allineato dalle Impostazioni. Volutamente NESSUN 'mascotchange': non è un
+ *  aspetto della companion, e un re-render della chat non serve. */
+export function mascotAutoPark() {
+  const v = localStorage.getItem(AUTOPARK_KEY);
+  if (v === null) return true; // default: attivo
+  return v === '1';
+}
+
+export function setMascotAutoPark(on) {
+  localStorage.setItem(AUTOPARK_KEY, on ? '1' : '0');
   return !!on;
 }
 

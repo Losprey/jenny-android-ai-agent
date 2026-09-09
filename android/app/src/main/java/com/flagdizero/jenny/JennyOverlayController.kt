@@ -140,6 +140,10 @@ class JennyOverlayController(private val context: Context) {
         private const val AIR_DRAG_PER_S = 0.8f
         private const val MIN_BOUNCE_PX_S = 150f
         private const val FLING_MIN_PX_S = 240f
+        // Batch 5 — gesti decisi: oltre questa velocità al rilascio il drag
+        // è un gesto, non un volo: orizzontale dominante = "lancio" verso il
+        // bordo (che poi parcheggia), verso l'alto dominante = nascondi.
+        private const val FLING_GESTURE_PX_S = 800f
         private const val MAX_BOUNCES = 3
 
         private const val PREFS_NAME = "overlay"
@@ -157,7 +161,8 @@ class JennyOverlayController(private val context: Context) {
         private const val PREFS_SIZE = "overlay/size"
         private const val PREFS_COLOR = "overlay/color"
         private const val PREFS_HAPTICS = "overlay/haptics"
-        // Hook per una futura UI di impostazioni (oggi nessuna UI: default).
+        // Scritta dalla UI di impostazioni (batch 5, toggle AutoPark in
+        // Impostazioni → Personalizzazione → Overlay); default = attivo.
         private const val PREFS_AUTO_PARK = "overlay/autoPark"
         private const val PREFS_PEEK_MIN_SLIVER_DP = "overlay/peekMinSliverDp"
 
@@ -313,16 +318,21 @@ class JennyOverlayController(private val context: Context) {
         size: String? = null,
         color: Boolean? = null,
         haptics: Boolean? = null,
+        autoPark: Boolean? = null,
     ) {
-        if (petView == null || (size == null && color == null && haptics == null)) return
+        if (petView == null ||
+            (size == null && color == null && haptics == null && autoPark == null)
+        ) return
         val s = size
         val c = color
         val h = haptics
+        val a = autoPark
         mainHandler.post {
             if (petView == null) return@post
             if (s != null && s in SIZE_DP_BY_PREF) chooseSize(s)
             if (c != null) chooseColor(c)
             if (h != null) chooseHaptics(h)
+            if (a != null) chooseAutoPark(a)
         }
     }
 
@@ -337,7 +347,10 @@ class JennyOverlayController(private val context: Context) {
         overlayPrefs().edit().putBoolean(PREFS_HIDDEN, hidden).apply()
     }
 
-    /** Preferenza futura "parcheggio automatico" (default true, nessuna UI). */
+    /** Preferenza "parcheggio automatico" (overlay/autoPark, default true):
+     *  la UI (batch 5) la scrive tramite MainActivity; qui decide il
+     *  parcheggio al bordo dopo i riposi e al termine del "lancio"
+     *  orizzontale del batch 5. */
     private fun autoParkPref(): Boolean = overlayPrefs().getBoolean(PREFS_AUTO_PARK, true)
 
     /** Sliver minimo di peek in dp (default 44, futura UI impostazioni). */
@@ -852,7 +865,8 @@ class JennyOverlayController(private val context: Context) {
         val size = readSizePref()
         val color = readColorPref()
         val haptics = readHapticsPref()
-        if (size == null && color == null && haptics == null) return
+        val autoPark = if (overlayPrefs().contains(PREFS_AUTO_PARK)) autoParkPref() else null
+        if (size == null && color == null && haptics == null && autoPark == null) return
         var js = "(function(){try{"
         if (size != null) {
             js += "if(localStorage.getItem('jenny-mascotte-size')===null){" +
@@ -868,6 +882,11 @@ class JennyOverlayController(private val context: Context) {
             val on = if (haptics) "1" else "0"
             js += "if(localStorage.getItem('jenny-mascotte-haptics')===null){" +
                 "localStorage.setItem('jenny-mascotte-haptics','$on');}"
+        }
+        if (autoPark != null) {
+            val on = if (autoPark) "1" else "0"
+            js += "if(localStorage.getItem('jenny-mascotte-autopark')===null){" +
+                "localStorage.setItem('jenny-mascotte-autopark','$on');}"
         }
         js += "return false;}catch(e){return false;}})()"
         view.evaluateJavascript(js) { raw ->
@@ -1139,6 +1158,17 @@ class JennyOverlayController(private val context: Context) {
                     return true
                 }
 
+                // Batch 5 — swipe deciso verso l'alto: nasconde la mascotte
+                // come la voce "Nascondi" del menu rapido (stessa preferenza
+                // persistente overlay/hidden, teardown differito da hide())
+                // senza passare dal volo. Qui si arriva solo con dragCommitted
+                // (tap/tocco doppio/long-press sono già usciti sopra), quindi
+                // la disambiguazione dai tocchi è già garantita.
+                if (vy <= -FLING_GESTURE_PX_S && abs(vy) >= abs(vx)) {
+                    hide()
+                    return true
+                }
+
                 if (parkedSide != 0) {
                     // Rilascio dopo un drag partito da parcheggiato: niente volo.
                     releaseParkedDrag()
@@ -1156,6 +1186,17 @@ class JennyOverlayController(private val context: Context) {
                     posY = floorTopY()
                     maybeParkAfterSettle()
                     startSit()
+                    return true
+                }
+                // Batch 5 — swipe orizzontale deciso da pet già sul pavimento:
+                // "lancio" verso il bordo indicato. La mascotte scivola sul
+                // pavimento fino al bordo visibile della zona utile e lì entra
+                // nel normale parcheggio (peek con sliver minimo se autoPark,
+                // altrimenti resta al clamp di bordo, del tutto visibile). Gli
+                // swipe obliqui, deboli o da mezz'aria restano un volo fisico
+                // (sotto, invariato).
+                if (alreadyOnFloor && abs(vx) >= FLING_GESTURE_PX_S && abs(vx) > abs(vy)) {
+                    throwToEdge(if (vx < 0f) -1 else 1)
                     return true
                 }
                 launchFlight(fvx, fvy)
@@ -1609,6 +1650,33 @@ class JennyOverlayController(private val context: Context) {
         )
     }
 
+    /** Preferenza "parcheggio automatico" applicata dalle Impostazioni
+     *  (batch 5): persistita in overlay/autoPark e rispecchiata in
+     *  localStorage (jenny-mascotte-autopark, stesso schema di haptics).
+     *  Effetti al volo sulla mascotte visibile: spegnendola, un pet
+     *  parcheggiato esce al bordo visibile della zona utile (stesso effetto
+     *  del tap sullo sliver); riaccendendola, un pet fermo in fascia di
+     *  bordo si parcheggia. Durante drag/volo/corsa/menu non tocca nulla:
+     *  la preferenza vale comunque al prossimo riposo. */
+    private fun chooseAutoPark(on: Boolean) {
+        overlayPrefs().edit().putBoolean(PREFS_AUTO_PARK, on).apply()
+        if (petView == null || petParams == null) return
+        val mirror = if (on) "1" else "0"
+        evalJs("try{localStorage.setItem('jenny-mascotte-autopark', '$mirror');}catch(e){}")
+        if (phase != Phase.IDLE || touchActive || dragCommitted || glideRunnable != null || menuOpen) return
+        if (!on) {
+            if (parkedSide != 0) {
+                unParkToEdge()
+                startSit()
+            }
+        } else {
+            if (parkedSide == 0 && settleRunnable == null) {
+                maybeParkAfterSettle()
+                if (parkedSide != 0) startSit()
+            }
+        }
+    }
+
     /** Tap singolo: breve reazione "viva" (pose ART già esistenti nella
      *  pagina, mai inventate), poi ritorno a idle. Il ritorno condivide il
      *  timer "settle": un nuovo tocco o un drag lo cancellano. */
@@ -1968,6 +2036,84 @@ class JennyOverlayController(private val context: Context) {
                 applyPose("idle")
             }
         }
+    }
+
+    // --------------------------------------------------------- lancio (batch 5)
+
+    /** "Lancio" orizzontale (batch 5): la mascotte, già sul pavimento, scivola
+     *  rapidamente fino al bordo visibile della zona utile lato `side`
+     *  (< 0 → sinistra) e lì entra nel normale meccanismo di parcheggio
+     *  (peek con sliver minimo se autoPark; altrimenti si ferma al clamp di
+     *  bordo, del tutto visibile). Riutilizza lo schema a passi della
+     *  curiosità (stessi campi glideRunnable/glideToken: un tocco la ferma,
+     *  il risparmio energetico la ferma) con coda dedicata che termina col
+     *  parcheggio. Non sposta la finestra fuori dai limiti orizzontali: il
+     *  parcheggio lo fa solo applyWindow quando parkedSide != 0. */
+    private fun throwToEdge(side: Int) {
+        if (petView == null || petParams == null) return
+        showHideTarget(false)
+        // Il drag è finito: la mascotte torna a riposo e la corsa al bordo è
+        // un movimento volontario da IDLE (come un riposo lento, ma deciso).
+        phase = Phase.IDLE
+        val target = if (side < 0) minDockX().toFloat() else maxDockX().toFloat()
+        posY = floorTopY()
+        val distance = abs(target - posX)
+        if (distance < dp(1)) {
+            // Già sul bordo visibile: entra direttamente nel parcheggio.
+            maybeParkAfterSettle()
+            startSit()
+            return
+        }
+        facingLeft = target < posX
+        val token = ++glideToken
+        val steps = 10
+        var index = 0
+        val step = object : Runnable {
+            override fun run() {
+                if (petView == null || glideToken != token) return
+                if (phase != Phase.IDLE || touchActive || energySaveActive()) {
+                    stopThrow(token)
+                    return
+                }
+                index++
+                applyPose(if (index % 2 == 0) "walk1" else "walk2")
+                posX += (target - posX) / (steps - index + 1)
+                applyWindow()
+                if (index < steps) {
+                    mainHandler.postDelayed(this, CURIOUS_GLIDE_STEP_MS)
+                } else {
+                    finishThrow(token)
+                }
+            }
+        }
+        glideRunnable = step
+        mainHandler.postDelayed(step, CURIOUS_GLIDE_STEP_MS)
+    }
+
+    /** Ferma una corsa di lancio (tocco o risparmio energetico): la mascotte
+     *  resta dov'è, posa di riposo; niente parcheggio forzato. */
+    private fun stopThrow(token: Int) {
+        if (glideToken != token) return
+        val r = glideRunnable
+        if (r != null) mainHandler.removeCallbacks(r)
+        glideRunnable = null
+        glideToken++
+        if (petView != null && phase == Phase.IDLE && parkedSide == 0) applyPose("idle")
+    }
+
+    /** Fine corsa: la mascotte è sul bordo visibile; entra nel parcheggio
+     *  (o resta al clamp se autoPark=false) e si siede. */
+    private fun finishThrow(token: Int) {
+        if (glideToken != token) return
+        val r = glideRunnable
+        if (r != null) mainHandler.removeCallbacks(r)
+        glideRunnable = null
+        glideToken++
+        if (petView == null) return
+        if (phase != Phase.IDLE) return
+        posY = floorTopY()
+        maybeParkAfterSettle()
+        startSit()
     }
 
     // ------------------------------------------------------------- bersaglio

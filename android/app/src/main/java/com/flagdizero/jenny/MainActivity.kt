@@ -1242,6 +1242,24 @@ class MainActivity : AppCompatActivity() {
             return on
         }
 
+        // ── Mascotte overlay: parcheggio automatico (batch 5) ──
+
+        @JavascriptInterface
+        fun overlayMascotAutoPark(): Boolean {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            return prefs.getBoolean("overlay/autoPark", true)
+        }
+
+        @JavascriptInterface
+        fun setOverlayMascotAutoPark(on: Boolean): Boolean {
+            getSharedPreferences("overlay", MODE_PRIVATE)
+                .edit().putBoolean("overlay/autoPark", on).apply()
+            runOnUiThread {
+                JennyOverlayController.live?.applyExternalVisuals(autoPark = on)
+            }
+            return on
+        }
+
         // ── Backup e ripristino ──
 
         /** Apre il picker SAF "salva con nome" per il backup già preparato dal

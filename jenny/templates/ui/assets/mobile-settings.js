@@ -9,7 +9,7 @@ import { THEMES, DEFAULT_THEME, setTheme } from './shared/theme.js';
 import { advancedMode, setAdvancedMode } from './shared/advanced-mode.js';
 import { mascotVisible, setMascotVisible,
   mascotColor, setMascotColor, mascotSize, setMascotSize,
-  mascotHaptics, setMascotHaptics,
+  mascotHaptics, setMascotHaptics, setMascotAutoPark,
   MASCOT_SIZES } from './shared/mascot.js';
 import { homeView, setHomeView, HOME_VIEW_CHOICES } from './shared/home-view.js';
 import { TelegramPairingWidget } from './shared/telegram-pairing.js';
@@ -1484,6 +1484,7 @@ export class SettingsController {
       let overlaySize = 'sm';
       let overlayColor = true;
       let overlayHaptics = true;
+      let overlayAutoPark = true;
       try {
         if (typeof nat.overlayMascotSize === 'function') {
           const s = nat.overlayMascotSize();
@@ -1495,6 +1496,9 @@ export class SettingsController {
         if (typeof nat.overlayMascotHaptics === 'function') {
           overlayHaptics = !!nat.overlayMascotHaptics();
         }
+        if (typeof nat.overlayMascotAutoPark === 'function') {
+          overlayAutoPark = !!nat.overlayMascotAutoPark();
+        }
       } catch (e) { /* noop */ }
       const rawOverlaySize = localStorage.getItem('jenny-mascotte-size');
       if (rawOverlaySize in MASCOT_SIZES) overlaySize = rawOverlaySize;
@@ -1502,6 +1506,8 @@ export class SettingsController {
       if (rawOverlayColor === '1' || rawOverlayColor === '0') overlayColor = rawOverlayColor === '1';
       const rawOverlayHaptics = localStorage.getItem('jenny-mascotte-haptics');
       if (rawOverlayHaptics === '1' || rawOverlayHaptics === '0') overlayHaptics = rawOverlayHaptics === '1';
+      const rawOverlayAutoPark = localStorage.getItem('jenny-mascotte-autopark');
+      if (rawOverlayAutoPark === '1' || rawOverlayAutoPark === '0') overlayAutoPark = rawOverlayAutoPark === '1';
       const overlayOff = overlayVisible ? '' : ' disabled';
       const overlaySizeButtons = Object.keys(MASCOT_SIZES).map(id =>
         `<button class="settings-seg-btn${id === overlaySize ? ' active' : ''}" data-overlay-size="${id}"${overlayOff}>
@@ -1533,6 +1539,13 @@ export class SettingsController {
         <label class="settings-label">${i18n.t('settings.overlayHaptics')}</label>
         <label class="toggle-switch">
           <input type="checkbox" id="overlay-haptics-toggle" ${overlayHaptics ? 'checked' : ''}${overlayOff}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="settings-field settings-toggle-row"${overlayVisible ? '' : ' data-settings-off'}>
+        <label class="settings-label">${i18n.t('settings.overlayAutoPark')}</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="overlay-autopark-toggle" ${overlayAutoPark ? 'checked' : ''}${overlayOff}>
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -2436,6 +2449,17 @@ export class SettingsController {
         const on = overlayHapticsToggle.checked;
         setMascotHaptics(on);
         try { nativeOverlay.setOverlayMascotHaptics(on); } catch (e) { /* noop */ }
+      });
+    }
+    // AutoPark (batch 5): stesso schema di haptics — prima la localStorage
+    // condivisa, poi il pref nativo overlay/autoPark e l'applicazione al
+    // volo alla mascotte già visibile (via applyExternalVisuals).
+    const overlayAutoParkToggle = this.contentEl.querySelector('#overlay-autopark-toggle');
+    if (overlayAutoParkToggle && nativeOverlay && typeof nativeOverlay.setOverlayMascotAutoPark === 'function') {
+      overlayAutoParkToggle.addEventListener('change', () => {
+        const on = overlayAutoParkToggle.checked;
+        setMascotAutoPark(on);
+        try { nativeOverlay.setOverlayMascotAutoPark(on); } catch (e) { /* noop */ }
       });
     }
 
