@@ -66,6 +66,10 @@ class JennyOverlayController(private val context: Context) {
         private const val TAP_TIMEOUT_MS = 340L
         private const val SIT_GROUND_MS = 650L
 
+        // Edge peek-hide (park mostly off-screen).
+        private const val PARK_BAND_DP = 36
+        private const val PEEK_SLIVER_DP = 20
+
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
         private const val FLOOR_RESTITUTION = 0.36f
@@ -99,6 +103,9 @@ class JennyOverlayController(private val context: Context) {
 
     private var phase = Phase.NONE
     private var facingLeft = false
+    // Edge peek-hide: -1 = parcheggiato sul bordo sinistro, +1 = bordo destro,
+    // 0 = non parcheggiato (finestra del tutto dentro lo schermo).
+    private var parkedSide = 0
 
     // Geometria (px reali del display).
     private var screenW = 0
@@ -233,6 +240,7 @@ class JennyOverlayController(private val context: Context) {
     @SuppressLint("SetJavaScriptEnabled")
     private fun showPet() {
         phase = Phase.IDLE
+        parkedSide = 0 // si riparte sempre non parcheggiato
         sizePx = dp(DEFAULT_SIZE_DP)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -384,8 +392,14 @@ class JennyOverlayController(private val context: Context) {
         lp.width = newSizePx
         lp.height = newSizePx
         if (phase == Phase.IDLE) {
-            posX = (posX * ratio).coerceIn(0f, (screenW - sizePx).toFloat())
-            posY = floorTopY()
+            if (parkedSide != 0) {
+                // Ridimensionamento mentre è parcheggiato: resta parcheggiato
+                // (nuovo offset di peek, piedi sul pavimento).
+                parkToSide(parkedSide)
+            } else {
+                posX = (posX * ratio).coerceIn(0f, (screenW - sizePx).toFloat())
+                posY = floorTopY()
+            }
         } else {
             posX *= ratio
             posY *= ratio
@@ -478,6 +492,12 @@ class JennyOverlayController(private val context: Context) {
                     val moved = abs(event.rawX - downRawX) > dp(TAP_SLOP_DP) ||
                         abs(event.rawY - downRawY) > dp(TAP_SLOP_DP)
                     if (duration < TAP_TIMEOUT_MS && !moved) {
+                        if (parkedSide != 0) {
+                            // Tap sullo sliver di un pet parcheggiato: non apre
+                            // MainActivity, riporta la finestra al bordo visibile.
+                            unParkToEdge()
+                            return true
+                        }
                         // Tap: apre l'app. Nessun long-press, nessun menu.
                         context.startActivity(
                             Intent(context, MainActivity::class.java).apply {
@@ -496,14 +516,22 @@ class JennyOverlayController(private val context: Context) {
                     return true
                 }
 
+                if (parkedSide != 0) {
+                    // Rilascio dopo un drag partito da parcheggiato: niente volo.
+                    releaseParkedDrag()
+                    return true
+                }
+
                 // Rilascio dopo il drag: volo o caduta.
                 val feetY = posY + artFeetFrac * sizePx
                 val alreadyOnFloor = feetY >= floorLineY - dp(2)
                 val fvx = if (max(abs(vx), abs(vy)) < FLING_MIN_PX_S) 0f else vx
                 val fvy = if (max(abs(vx), abs(vy)) < FLING_MIN_PX_S) 0f else vy
                 if (alreadyOnFloor && abs(fvx) < dp(2) && abs(fvy) < dp(2)) {
-                    // L'utente l'ha solo riposata: resta dov'è e si siede.
+                    // L'utente l'ha solo riposata: resta dov'è e si siede
+                    // (vicino al bordo laterale si parcheggia in peek).
                     posY = floorTopY()
+                    maybeParkAfterSettle()
                     startSit()
                     return true
                 }
@@ -515,7 +543,14 @@ class JennyOverlayController(private val context: Context) {
                 commitRunnable?.let { mainHandler.removeCallbacks(it) }
                 commitRunnable = null
                 if (dragCommitted) {
-                    launchFlight(0f, 0f)
+                    if (parkedSide != 0) {
+                        // Drag interrotto di un pet parcheggiato: torna in peek.
+                        showHideTarget(false)
+                        parkToSide(parkedSide)
+                        startSit()
+                    } else {
+                        launchFlight(0f, 0f)
+                    }
                 }
             }
 
@@ -634,7 +669,7 @@ class JennyOverlayController(private val context: Context) {
         if (phase != Phase.FLY) return
         phase = Phase.IDLE
         posY = floorTopY()
-        applyWindow()
+        maybeParkAfterSettle()
         startSit()
     }
 
@@ -649,6 +684,79 @@ class JennyOverlayController(private val context: Context) {
         }
         settleRunnable = sitRunnable
         mainHandler.postDelayed(sitRunnable, SIT_GROUND_MS)
+    }
+
+    // ---------------------------------------------- edge peek-hide (parcheggio)
+
+    /** Px nascosti fuori schermo quando la finestra è parcheggiata: resta
+     *  visibile solo uno sliver di PEEK_SLIVER_DP. */
+    private fun peekOffsetPx(): Int = max(0, sizePx - dp(PEEK_SLIVER_DP))
+
+    /** Porta la mascotte in posizione di peek sul bordo indicato (side < 0 →
+     *  sinistra, side > 0 → destra): posX = -(sizePx - sliver) o
+     *  posX = maxX + (sizePx - sliver). y resta sul pavimento (già a riposo). */
+    private fun parkToSide(side: Int) {
+        val maxX = max(0, screenW - sizePx)
+        val offset = peekOffsetPx()
+        parkedSide = if (side < 0) -1 else 1
+        posX = if (side < 0) -offset.toFloat() else (maxX + offset).toFloat()
+        posY = floorTopY()
+        applyWindow()
+    }
+
+    /** Da parcheggiato: tap sullo sliver → si rientra sul bordo (x = 0 o
+     *  maxX), finestra completamente visibile, stato normale. */
+    private fun unParkToEdge() {
+        val side = parkedSide
+        val maxX = max(0, screenW - sizePx)
+        parkedSide = 0
+        posX = if (side < 0) 0f else maxX.toFloat()
+        posY = floorTopY()
+        applyWindow()
+    }
+
+    /** Da chiamare SOLO a riposo (settleFlight o rilascio debole sul pavimento),
+     *  mai in volo: se il bordo sinistro della finestra è entro PARK_BAND_DP dal
+     *  bordo laterale dello schermo la parcheggia quasi fuori schermo; se no la
+     *  lascia dov'è. Il parcheggio guarda solo la x: mai su bordi alto/basso. */
+    private fun maybeParkAfterSettle() {
+        val band = dp(PARK_BAND_DP)
+        val maxX = max(0, screenW - sizePx)
+        val side = when {
+            posX <= band -> -1
+            posX >= maxX - band -> 1
+            else -> 0
+        }
+        if (side != 0) {
+            parkToSide(side)
+        } else {
+            parkedSide = 0
+            applyWindow()
+        }
+    }
+
+    /** Rilascio di un drag partito da parcheggiato: il volo è soppresso. Se la
+     *  mascotte è stata sfilata del tutto (x in [0, maxX]) esce dal parcheggio e
+     *  vale il rilascio debole normale (re-park se finisce di nuovo in fascia di
+     *  bordo); se è ancora in parte fuori schermo torna nella posizione di peek. */
+    private fun releaseParkedDrag() {
+        showHideTarget(false)
+        val maxX = max(0, screenW - sizePx)
+        if (posX >= 0f && posX <= maxX.toFloat()) {
+            parkedSide = 0
+            val feetY = posY + artFeetFrac * sizePx
+            if (feetY >= floorLineY - dp(2)) {
+                posY = floorTopY()
+                maybeParkAfterSettle()
+                startSit()
+            } else {
+                // Caduta verticale (zero velocità orizzontale), mai un volo vero.
+                launchFlight(0f, 0f)
+            }
+        } else {
+            parkToSide(parkedSide)
+            startSit()
+        }
     }
 
     // ------------------------------------------------------------- bersaglio
@@ -715,7 +823,11 @@ class JennyOverlayController(private val context: Context) {
 
     private fun applyWindow() {
         val lp = petParams ?: return
-        val x = posX.roundToInt().coerceIn(0, max(0, screenW - sizePx))
+        val maxX = max(0, screenW - sizePx)
+        // Edge peek-hide: da parcheggiato la finestra può stare quasi tutta fuori
+        // schermo (x negativa o oltre maxX); altrimenti il clamp resta identico.
+        val parkOut = if (parkedSide != 0) peekOffsetPx() else 0
+        val x = posX.roundToInt().coerceIn(-parkOut, maxX + parkOut)
         val y = posY.roundToInt().coerceIn(0, max(0, floorTopY().toInt().coerceAtLeast(0)))
         if (lp.x != x || lp.y != y) {
             lp.x = x
