@@ -16,6 +16,7 @@ const SIDE_KEY = 'jenny-mascotte-dock-side';
 const LEGACY_SIDE_KEY = 'jenny-mascotte-side';
 const COLOR_KEY = 'jenny-mascotte-color';
 const SIZE_KEY = 'jenny-mascotte-size';
+const HAPTICS_KEY = 'jenny-mascotte-haptics'; // batch 4: vibrazione overlay
 
 /** Lato del canvas quadrato per ogni taglia. Il default è 'sm'; la geometria
  *  in mobile-style.css deriva tutta da --jenny-size, quindi qui basta
@@ -68,6 +69,22 @@ export function setMascotColor(on) {
   window.dispatchEvent(new CustomEvent('mascotchange', {
     detail: { visible: mascotVisible(), side: mascotSide(), color: !!on },
   }));
+  return !!on;
+}
+
+/** Vibrazione sottile dell'overlay pet (batch 4). Preferenza client-side come
+ *  le altre (localStorage); il controller nativo la legge dal suo pref
+ *  overlay/haptics, mantenuto allineato da Impostazioni e dal menu rapido.
+ *  Volutamente NESSUN 'mascotchange': non è un aspetto della companion, e un
+ *  re-render della chat non serve. */
+export function mascotHaptics() {
+  const h = localStorage.getItem(HAPTICS_KEY);
+  if (h === null) return true; // default: attiva
+  return h === '1';
+}
+
+export function setMascotHaptics(on) {
+  localStorage.setItem(HAPTICS_KEY, on ? '1' : '0');
   return !!on;
 }
 

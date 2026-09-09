@@ -693,6 +693,14 @@ class MainActivity : AppCompatActivity() {
                         action = GatewayService.ACTION_SHOW_OVERLAY
                     }
                 )
+                // Batch 4: l'app è tornata in primo piano → la mascotte overlay
+                // saluta con un piccolo balzo. È l'equivalente più vicino — senza
+                // nuovi permessi — a una reazione alle notifiche in arrivo: qui
+                // non esiste un NotificationListenerService (e aggiungerne uno è
+                // fuori scope). Il controller decide da solo se il saluto è
+                // appropriato: a riposo, pagina sveglia e non più di una volta
+                // ogni CHEER_MIN_INTERVAL_MS.
+                JennyOverlayController.live?.cheerUp()
             }
         }
     }
@@ -1169,14 +1177,15 @@ class MainActivity : AppCompatActivity() {
             return false
         }
 
-        // ── Mascotte overlay: taglia e colore (batch 3) ──
+        // ── Mascotte overlay: taglia, colore e vibrazione (batch 3 + 4) ──
         // Stesse chiavi del menu rapido della mascotte: prefs "overlay" con
-        // overlay/size ("sm"|"md"|"lg", assente => "sm") e overlay/color
-        // (bool, assente => true). Ogni setter persiste la preferenza e poi
-        // applica al volo la modifica alla mascotte gia visibile tramite il
-        // controller vivo (JennyOverlayController.live, posseduto da
-        // GatewayService); se l'overlay non e attivo la preferenza basta: la
-        // pagina la usera come seed al prossimo avvio.
+        // overlay/size ("sm"|"md"|"lg", assente => "sm"), overlay/color
+        // (bool, assente => true) e overlay/haptics (bool, assente => true,
+        // batch 4). Ogni setter persiste la preferenza e poi applica al volo la
+        // modifica alla mascotte già visibile tramite il controller vivo
+        // (JennyOverlayController.live, posseduto da GatewayService); se
+        // l'overlay non è attivo la preferenza basta: la pagina la userà come
+        // seed al prossimo avvio.
 
         private val overlaySizes = setOf("sm", "md", "lg")
 
@@ -1211,6 +1220,24 @@ class MainActivity : AppCompatActivity() {
                 .edit().putBoolean("overlay/color", on).apply()
             runOnUiThread {
                 JennyOverlayController.live?.applyExternalVisuals(color = on)
+            }
+            return on
+        }
+
+        // ── Mascotte overlay: vibrazione (batch 4) ──
+
+        @JavascriptInterface
+        fun overlayMascotHaptics(): Boolean {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            return prefs.getBoolean("overlay/haptics", true)
+        }
+
+        @JavascriptInterface
+        fun setOverlayMascotHaptics(on: Boolean): Boolean {
+            getSharedPreferences("overlay", MODE_PRIVATE)
+                .edit().putBoolean("overlay/haptics", on).apply()
+            runOnUiThread {
+                JennyOverlayController.live?.applyExternalVisuals(haptics = on)
             }
             return on
         }

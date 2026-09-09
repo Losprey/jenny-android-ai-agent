@@ -9,6 +9,7 @@ import { THEMES, DEFAULT_THEME, setTheme } from './shared/theme.js';
 import { advancedMode, setAdvancedMode } from './shared/advanced-mode.js';
 import { mascotVisible, setMascotVisible,
   mascotColor, setMascotColor, mascotSize, setMascotSize,
+  mascotHaptics, setMascotHaptics,
   MASCOT_SIZES } from './shared/mascot.js';
 import { homeView, setHomeView, HOME_VIEW_CHOICES } from './shared/home-view.js';
 import { TelegramPairingWidget } from './shared/telegram-pairing.js';
@@ -1482,6 +1483,7 @@ export class SettingsController {
       // avvio (chiave assente => "sm" / true).
       let overlaySize = 'sm';
       let overlayColor = true;
+      let overlayHaptics = true;
       try {
         if (typeof nat.overlayMascotSize === 'function') {
           const s = nat.overlayMascotSize();
@@ -1490,11 +1492,16 @@ export class SettingsController {
         if (typeof nat.overlayMascotColor === 'function') {
           overlayColor = !!nat.overlayMascotColor();
         }
+        if (typeof nat.overlayMascotHaptics === 'function') {
+          overlayHaptics = !!nat.overlayMascotHaptics();
+        }
       } catch (e) { /* noop */ }
       const rawOverlaySize = localStorage.getItem('jenny-mascotte-size');
       if (rawOverlaySize in MASCOT_SIZES) overlaySize = rawOverlaySize;
       const rawOverlayColor = localStorage.getItem('jenny-mascotte-color');
       if (rawOverlayColor === '1' || rawOverlayColor === '0') overlayColor = rawOverlayColor === '1';
+      const rawOverlayHaptics = localStorage.getItem('jenny-mascotte-haptics');
+      if (rawOverlayHaptics === '1' || rawOverlayHaptics === '0') overlayHaptics = rawOverlayHaptics === '1';
       const overlayOff = overlayVisible ? '' : ' disabled';
       const overlaySizeButtons = Object.keys(MASCOT_SIZES).map(id =>
         `<button class="settings-seg-btn${id === overlaySize ? ' active' : ''}" data-overlay-size="${id}"${overlayOff}>
@@ -1519,6 +1526,13 @@ export class SettingsController {
         <label class="settings-label">${i18n.t('settings.overlayColor')}</label>
         <label class="toggle-switch">
           <input type="checkbox" id="overlay-color-toggle" ${overlayColor ? 'checked' : ''}${overlayOff}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="settings-field settings-toggle-row"${overlayVisible ? '' : ' data-settings-off'}>
+        <label class="settings-label">${i18n.t('settings.overlayHaptics')}</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="overlay-haptics-toggle" ${overlayHaptics ? 'checked' : ''}${overlayOff}>
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -2414,6 +2428,14 @@ export class SettingsController {
         const on = overlayColorToggle.checked;
         setMascotColor(on);
         try { nativeOverlay.setOverlayMascotColor(on); } catch (e) { /* noop */ }
+      });
+    }
+    const overlayHapticsToggle = this.contentEl.querySelector('#overlay-haptics-toggle');
+    if (overlayHapticsToggle && nativeOverlay && typeof nativeOverlay.setOverlayMascotHaptics === 'function') {
+      overlayHapticsToggle.addEventListener('change', () => {
+        const on = overlayHapticsToggle.checked;
+        setMascotHaptics(on);
+        try { nativeOverlay.setOverlayMascotHaptics(on); } catch (e) { /* noop */ }
       });
     }
 

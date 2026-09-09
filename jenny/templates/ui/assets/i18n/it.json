@@ -222,6 +222,7 @@
     "overlaySection": "Overlay",
     "overlaySize": "Dimensione desktop pet",
     "overlayColor": "Desktop pet a colori",
+    "overlayHaptics": "Vibrazione desktop pet (poke, menu, easter egg)",
     "overlayVisible": "Mascotte sopra le altre app",
     "overlayHint": "Jenny vive anche fuori dall'app come piccolo desktop pet: trascinala, lanciala e lasciala cadere. Per nasconderla rilasciala sul bersaglio \u2715 che compare in alto durante il trascinamento.",
     "homeSection": "Tasto Home",

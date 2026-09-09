@@ -27,8 +27,8 @@
     transform-origin: 50% 100%;
   }
   @keyframes jenny-bob {
-    0%, 100% { transform: translateY(0); }
-    50%      { transform: translateY(var(--jenny-bob, -4px)); }
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    50%      { transform: translateY(var(--jenny-bob, -4px)) scale(1.015, 0.985); }
   }
 
   /* ---- Livello dedicato ai micro-movimenti (vita idle, caduta, hang):
@@ -334,6 +334,7 @@
   var microT = null;
   var ambientTimer = null;
   var bubbleTimer = null;
+  var motionSeq = 0;        // token anti-race delle sequenze composte (batch 4)
 
   /* ---- 1) Micro-vita idle (transform sottili su #motion). ---- */
   function idleLifeAllowed() {
@@ -353,19 +354,24 @@
   function idleLifeTick() {
     idleLifeT = null;
     if (!idleLifeAllowed()) { idleLifeRunning = false; return; }
-    // Ogni tanto una breve posa "viva" già esistente, poi ritorno all'idle.
-    if (Math.random() < 0.32) {
-      var poses = ['hello1', 'hello2', 'think'];
-      var p = poses[Math.floor(Math.random() * poses.length)];
-      setPose(p, leftSide, true);
-      idleLifeT = setTimeout(function () {
-        idleLifeT = null;
-        if (idleLifeAllowed()) { setPose('idle', leftSide, true); }
-        else { ensureIdleArt(); }
+    // In carica: piccole pose felici più frequenti (la pagina "carica felice").
+    if (batteryState && batteryState.charging) {
+      if (Math.random() < 0.55) {
+        lifeFlash(['hello1', 'hello2'], 1200 + Math.random() * 800);
+      } else {
+        applyMicro();
         scheduleLifeNext();
-      }, 1500 + Math.random() * 900);
+      }
       return;
     }
+    var roll = Math.random();
+    if (roll < 0.30) {
+      // Breve posa "viva" già esistente, poi ritorno all'idle.
+      lifeFlash(['hello1', 'hello2', 'think']);
+      return;
+    }
+    if (roll < 0.48) { lookAround(); return; }
+    if (roll < 0.56) { groomShake(); return; }
     applyMicro();
     scheduleLifeNext();
   }
@@ -384,6 +390,7 @@
     }, 1000);
   }
   function clearMicro() {
+    motionSeq++;   // invalida anche le sequenze composte in corso (batch 4)
     if (microT) { clearTimeout(microT); microT = null; }
     motionEl.style.transition = '';
     motionEl.style.transform = '';
@@ -401,6 +408,62 @@
     }
   }
 
+  /* ---- Batch 4: sequenze composte per la vita idle (sguardo, "toeletta").
+          Nessuna pose nuova senza asset: si riusano pose esistenti (lifeFlash)
+          e micro-transform su #motion. clearMicro() azzera anche il token, così
+          un cambio posa nativo interrompe subito ogni sequenza in corso. ---- */
+  function seqStep(delayMs, fn) {
+    var token = motionSeq;
+    setTimeout(function () {
+      if (token !== motionSeq) return;
+      fn();
+    }, delayMs);
+  }
+  function motionSet(tx, ty, rot, scale, durMs, ease) {
+    motionEl.style.transition =
+      'transform ' + durMs + 'ms ' + (ease || 'ease-in-out');
+    motionEl.style.transform =
+      'scale(' + scale + ') translate(' + tx + 'px,' + ty + 'px) rotate(' + rot + 'deg)';
+  }
+  function motionHome(durMs) {
+    motionEl.style.transition = 'transform ' + (durMs || 400) + 'ms ease-in-out';
+    motionEl.style.transform = '';
+  }
+  function lifeFlash(poses, holdMs) {
+    var p = poses[Math.floor(Math.random() * poses.length)];
+    setPose(p, leftSide, true);
+    idleLifeT = setTimeout(function () {
+      idleLifeT = null;
+      if (idleLifeAllowed()) { setPose('idle', leftSide, true); }
+      else { ensureIdleArt(); }
+      scheduleLifeNext();
+    }, holdMs || (1500 + Math.random() * 900));
+  }
+  function lookAround() {
+    // Due sguardi lenti a destra/sinistra con una lieve rotazione, poi a casa.
+    seqStep(0, function () { motionSet(-9, -1, -4, 1, 1000); });
+    seqStep(1050, function () { motionSet(8, -1, 4, 1, 1400); });
+    seqStep(2500, function () { motionSet(0, 0, 0, 1, 700); });
+    seqStep(3250, function () {
+      if (!idleLifeAllowed()) { idleLifeRunning = false; return; }
+      motionHome(400);
+      scheduleLifeNext();
+    });
+  }
+  function groomShake() {
+    // Breve scrollata (equivalente composto di una "toeletta").
+    seqStep(0, function () { motionSet(0, 0, 0, 1, 0); });
+    seqStep(50, function () { motionSet(-5, 0, -2, 1, 90); });
+    seqStep(150, function () { motionSet(5, 0, 2, 1, 90); });
+    seqStep(250, function () { motionSet(-5, 0, -2, 1, 90); });
+    seqStep(350, function () { motionSet(5, 0, 2, 1, 90); });
+    seqStep(460, function () {
+      if (!idleLifeAllowed()) { idleLifeRunning = false; return; }
+      motionHome(300);
+      scheduleLifeNext();
+    });
+  }
+
   /* ---- 2) Sonno ---- */
   function clearSleepTimer() {
     if (sleepTimer) { clearTimeout(sleepTimer); sleepTimer = null; }
@@ -411,7 +474,7 @@
     if (document.hidden) return;
     if (sleepTimer) return;
     if (idleSinceMs === null) idleSinceMs = Date.now();
-    var wait = Math.max(120, SLEEP_AFTER_MS - (Date.now() - idleSinceMs));
+    var wait = Math.max(120, effectiveSleepAfter() - (Date.now() - idleSinceMs));
     sleepTimer = setTimeout(enterSleep, wait);
   }
   function enterSleep() {
@@ -510,6 +573,12 @@
       clearSleepTimer();
       stopIdleLife(false);
       hideBubble();
+      // Batch 4, ora del giorno: al primo contatto del giorno (un poke = una
+      // posa hello/think nativa) saluta la mattina, o accenna la sonnolenza
+      // in serata. Mai più di una volta per fascia oraria.
+      if (name === 'hello1' || name === 'hello2' || name === 'think') {
+        notePokeGreeting();
+      }
     }
 
     if (name !== prev) {
@@ -588,6 +657,144 @@
     if (activePose !== null) setPose(activePose, leftSide, true);
   };
 
+  /* ---- 4c) Batch 4: batteria/carica, ora del giorno, easter egg ----
+     Solo orologio locale della pagina (nessun fuso da gestire). Lo stato
+     batteria lo spinge il controller Kotlin (window.__jennySetBattery), perché
+     la pagina non vede gli eventi batteria di Android. Nessuna pose nuova:
+     si compone da pose esistenti + micro-transform. ---- */
+  var BATTERY_LOW_PERCENT = 15;
+  var batteryState = null;            // { charging: boolean, level: 0..100 }
+
+  window.__jennySetBattery = function (charging, level) {
+    var prev = batteryState;
+    charging = !!charging;
+    if (isFinite(level)) { level = Math.max(0, Math.min(100, Math.round(level))); }
+    else { level = 100; }
+    batteryState = { charging: charging, level: level };
+    if (document.hidden) return;
+    if (lateNightHour()) return;      // di notte resta a dormire, anche in carica
+    if (prev) {
+      if (charging && !prev.charging) onChargingStarted();
+      else if (!charging && prev.charging && level <= BATTERY_LOW_PERCENT) {
+        onLowBatteryTired();
+      }
+    } else if (!charging && level <= BATTERY_LOW_PERCENT) {
+      onLowBatteryTired();            // già scarica quando l'overlay parte
+    }
+  };
+
+  function dayKey() {
+    var d = new Date();
+    return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  }
+  function hourNow() { return new Date().getHours(); }
+  function lateNightHour() {
+    var h = hourNow();
+    return (h >= 23 || h < 7);
+  }
+  function randomLine(list) {
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  /* In carica: si sveglia (se stava dormendo di giorno) e fa un piccolo
+     balzo felice + bolla. */
+  function onChargingStarted() {
+    if (sleeping && prefs.sleep) doWake();
+    if (sleeping) return;
+    if (activePose !== 'idle') return;
+    showBubble(randomLine(['In carica!', 'Energia!']), 2200);
+    clearMicro();
+    seqStep(0, function () { motionSet(0, -12, 0, 1, 200, 'ease-out'); });
+    seqStep(240, function () {
+      if (idleLifeAllowed()) {
+        motionHome(320);
+        scheduleLifeNext();
+      }
+    });
+  }
+
+  /* Batteria sotto la soglia e NON in carica: si "stanca" (bolla) e, se resta
+     da sola, si addormenta subito dopo. Il rientro da idle è più rapido finché
+     è scarica (vedi effectiveSleepAfter). */
+  function onLowBatteryTired() {
+    if (sleeping || !prefs.sleep || !prefs.idle) return;
+    if (activePose !== 'idle' || document.hidden) return;
+    showBubble(randomLine(['Che sonno…', 'Batteria giù…']), 2400);
+    setTimeout(function () {
+      if (sleeping || document.hidden) return;
+      if (activePose !== 'idle') return;
+      if (batteryState && batteryState.charging) return;
+      sleepNow();
+    }, 3000);
+  }
+
+  /* Primo contatto del giorno: saluto al mattino, sbadiglio composto in
+     serata (bolla), una sola volta per fascia. */
+  var greetedDayKey = '';
+  var yawnedDayKey = '';
+  function notePokeGreeting() {
+    if (!prefs.bubble || sleeping || document.hidden) return;
+    var h = hourNow();
+    var today = dayKey();
+    if (h >= 6 && h < 10 && greetedDayKey !== today) {
+      greetedDayKey = today;
+      showBubble(randomLine(['Buongiorno!', 'Mmm, buongiorno…']), 2200);
+    } else if (h >= 20 && h < 23 && yawnedDayKey !== today) {
+      yawnedDayKey = today;
+      showBubble(randomLine(['Che sonno…', 'Sbadiglio…']), 2200);
+    }
+  }
+
+  /* Quanto idle prima di dormire: la sera si abbassa (più è tardi più è
+     stanca), e così pure a batteria scarica. Base invariata di giorno. */
+  function effectiveSleepAfter() {
+    var base = SLEEP_AFTER_MS;
+    var h = hourNow();
+    if (batteryState && !batteryState.charging &&
+        batteryState.level <= BATTERY_LOW_PERCENT) {
+      base = Math.min(base, 8000);
+    }
+    if (h >= 20 && h < 23) {
+      base = Math.min(base, Math.round(SLEEP_AFTER_MS * (1 - (h - 19) * 0.15)));
+    }
+    return Math.max(4000, base);
+  }
+
+  /* Celebrazione easter egg (chiamata dal controller dopo i tap ravvicinati):
+     sequenza rapida di pose esistenti + saltelli su #motion. Le pose sono
+     life-style: lo stato logico lo riallinea poi il ritorno a idle del
+     controller. */
+  window.__jennyCelebrate = function () {
+    if (document.hidden) return;
+    if (sleeping && prefs.sleep) doWake();
+    if (sleeping) return;
+    clearMicro();
+    var seq = ['hello2', 'think', 'hello1', 'hello2'];
+    for (var i = 0; i < seq.length; i++) {
+      (function (pose, idx) {
+        seqStep(60 + idx * 240, function () {
+          setPose(pose, leftSide, true);
+          if (idx % 2 === 0) {
+            motionSet(0, -12, 0, 1, 170, 'ease-out');
+          } else {
+            motionHome(200);
+          }
+        });
+      })(seq[i], i);
+    }
+    seqStep(80 + seq.length * 240, function () {
+      motionHome(150);
+      if (!sleeping && activePose !== null) {
+        if (idleLifeAllowed()) {
+          setPose('idle', leftSide, true);
+          scheduleLifeNext();
+        } else {
+          ensureIdleArt();
+        }
+      }
+    });
+  };
+
   /* ---- 5) Frasi ambientali opzionali (brevissime, lingua del file) ---- */
   var AMBIENT_LINES = {
     night:   ['Buona notte!', 'Notte, notte.'],
@@ -649,6 +856,15 @@
   }
 
   setPose('idle', false);
+  // Notte fonda (dopo le 23 o prima delle 7): parte già addormentata e si
+  // sveglia al tocco (ogni poke nativo fa doWake). Rispetta le preferenze.
+  if (lateNightHour() && prefs.sleep && prefs.idle) {
+    setTimeout(function () {
+      if (sleeping || !prefs.sleep) return;
+      if (document.hidden) return;
+      if (activePose === 'idle') sleepNow();
+    }, 1200);
+  }
 })();
 </script>
 </body>

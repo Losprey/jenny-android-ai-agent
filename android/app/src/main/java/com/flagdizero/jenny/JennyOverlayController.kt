@@ -14,6 +14,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -109,6 +111,26 @@ class JennyOverlayController(private val context: Context) {
         // Soglia batteria sotto cui il controller riduce il lavoro non
         // essenziale (pose/spostamenti puramente decorativi).
         private const val LOW_BATTERY_PERCENT = 15
+        // Batch 4 — vibrazione sottile nativa (overlay/haptics, default true):
+        // durate volutamente brevi, niente vibrazione su doppio tap o drag.
+        private const val VIBRATE_POKE_MS = 16L
+        private const val VIBRATE_MENU_MS = 24L
+        private const val VIBRATE_SIZE_MS = 28L
+        private const val VIBRATE_EASTER_MS = 55L
+        private const val VIBRATE_EASTER_GAP_MS = 110L
+
+        // Easter egg: N tap singoli ravvicinati (senza drag/long-press/doppio
+        // tap) entro una finestra mobile; al raggiungimento il poke di quel tap
+        // NON parte e la pagina celebra.
+        private const val EASTER_TAP_COUNT = 6
+        private const val EASTER_WINDOW_MS = 2500L
+        private const val EASTER_RETURN_IDLE_MS = 2600L
+
+        // Saluto quando l'app host torna in primo piano (sostituto delle
+        // notifiche, batch 4): mai più spesso di CHEER_MIN_INTERVAL_MS e solo
+        // se sono passati almeno CHEER_MIN_QUIET_MS dall'ultimo tocco.
+        private const val CHEER_MIN_INTERVAL_MS = 60_000L
+        private const val CHEER_MIN_QUIET_MS = 20_000L
 
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
@@ -134,6 +156,7 @@ class JennyOverlayController(private val context: Context) {
         // colore: true = sprite -color.
         private const val PREFS_SIZE = "overlay/size"
         private const val PREFS_COLOR = "overlay/color"
+        private const val PREFS_HAPTICS = "overlay/haptics"
         // Hook per una futura UI di impostazioni (oggi nessuna UI: default).
         private const val PREFS_AUTO_PARK = "overlay/autoPark"
         private const val PREFS_PEEK_MIN_SLIVER_DP = "overlay/peekMinSliverDp"
@@ -237,6 +260,9 @@ class JennyOverlayController(private val context: Context) {
                 Intent.ACTION_SCREEN_OFF -> onScreenOff()
                 Intent.ACTION_SCREEN_ON -> onScreenOn()
                 PowerManager.ACTION_POWER_SAVE_MODE_CHANGED -> refreshPowerState()
+                Intent.ACTION_POWER_CONNECTED -> refreshPowerState()
+                Intent.ACTION_POWER_DISCONNECTED -> refreshPowerState()
+                Intent.ACTION_BATTERY_CHANGED -> refreshPowerState()
                 else -> {}
             }
         }
@@ -283,14 +309,20 @@ class JennyOverlayController(private val context: Context) {
      *  preferenza, aggiorna la localStorage della pagina, riclampa la
      *  geometria / ricarica la posa corrente). Se l'overlay non e avviato non
      *  fa nulla: la pagina usera le preferenze gia scritte al prossimo avvio. */
-    fun applyExternalVisuals(size: String? = null, color: Boolean? = null) {
-        if (petView == null || (size == null && color == null)) return
+    fun applyExternalVisuals(
+        size: String? = null,
+        color: Boolean? = null,
+        haptics: Boolean? = null,
+    ) {
+        if (petView == null || (size == null && color == null && haptics == null)) return
         val s = size
         val c = color
+        val h = haptics
         mainHandler.post {
             if (petView == null) return@post
             if (s != null && s in SIZE_DP_BY_PREF) chooseSize(s)
             if (c != null) chooseColor(c)
+            if (h != null) chooseHaptics(h)
         }
     }
 
@@ -326,6 +358,13 @@ class JennyOverlayController(private val context: Context) {
     /** Stessa preferenza, ma "assente" distinguibile dal default. */
     private fun readColorPref(): Boolean? =
         if (overlayPrefs().contains(PREFS_COLOR)) colorPref() else null
+
+    /** Preferenza vibrazione (overlay/haptics; default true). */
+    private fun hapticsPref(): Boolean = overlayPrefs().getBoolean(PREFS_HAPTICS, true)
+
+    /** Stessa preferenza, ma "assente" distinguibile dal default. */
+    private fun readHapticsPref(): Boolean? =
+        if (overlayPrefs().contains(PREFS_HAPTICS)) hapticsPref() else null
 
     /** Salva posizione e parcheggio correnti (niente dati sensibili). Chiamato
      *  a riposo (settle), a fine drag, a fine parcheggio e prima dello stop. */
@@ -527,32 +566,59 @@ class JennyOverlayController(private val context: Context) {
     /** Vero quando conviene ridurre il lavoro non essenziale: schermo spento,
      *  risparmio energetico o batteria sotto soglia. Non tocca MAI il drag e
      *  non tocca il parcheggio (spec: "keep park"). */
+    // Batch 4: stato "in carica" (cavo collegato) e livello batteria corrente.
+    // Spinti alla pagina perché scelga pose/ritmi — la pagina non vede gli
+    // eventi batteria di Android. Aggiornati in refreshPowerState().
+    private var charging = false
+    private var batteryLevel = 100
+
     private fun energySaveActive(): Boolean = screenOff || powerSaveMode || lowBattery
 
-    /** Rilegge risparmio energetico + livello batteria e applica il gating. */
+    /** Rilegge risparmio energetico + stato batteria e applica il gating.
+     *  Batch 4: tiene anche aggiornati charging/batteryLevel e li spinge alla
+     *  pagina (pose "in carica"/"stanca"). Le semantiche di risparmio non
+     *  cambiano: lowBattery è ancora solo livello <= LOW_BATTERY_PERCENT. */
     private fun refreshPowerState() {
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
         screenOff = !pm.isInteractive
         powerSaveMode = pm.isPowerSaveMode
-        lowBattery = batteryPercentNow() <= LOW_BATTERY_PERCENT
+        val (level, plugged) = readBatteryNow()
+        batteryLevel = level
+        charging = plugged
+        lowBattery = batteryLevel <= LOW_BATTERY_PERCENT
         Log.i(
             TAG,
-            "power: screenOff=$screenOff powerSave=$powerSaveMode lowBattery=$lowBattery"
+            "power: screenOff=$screenOff powerSave=$powerSaveMode " +
+                "charging=$charging batteryLevel=$batteryLevel lowBattery=$lowBattery"
         )
+        pushBatteryToPage()
         // Se il risparmio finisce mentre l'art non era ancora misurata, riparte
         // il polling (l'unica attività periodica del controller a riposo).
         if (!energySaveActive() && artFeetFrac >= 1f && petView != null) pollArtAndPrefs()
     }
 
-    /** Livello batteria corrente dalla sticky broadcast, o 100 se illeggibile. */
-    private fun batteryPercentNow(): Int {
+    /** Livello batteria corrente + stato "cavo collegato" dalla sticky
+     *  broadcast, o (100, false) se illeggibile. */
+    private fun readBatteryNow(): Pair<Int, Boolean> {
         val sticky = runCatching {
             context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        }.getOrNull() ?: return 100
+        }.getOrNull() ?: return 100 to false
         val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
         val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-        if (level < 0 || scale <= 0) return 100
-        return (level * 100 / scale).coerceIn(0, 100)
+        val plugged = sticky.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
+        if (level < 0 || scale <= 0) return 100 to plugged
+        return (level * 100 / scale).coerceIn(0, 100) to plugged
+    }
+
+    /** Spinge alla pagina lo stato batteria corrente perché scelga pose e
+     *  ritmi (batch 4). Niente a schermo spento: la pagina non è visibile e lo
+     *  stato verrà rimandato allo screen on o al prossimo evento batteria. */
+    private fun pushBatteryToPage() {
+        if (petView == null || screenOff) return
+        evalJs(
+            "window.__jennySetBattery && " +
+                "window.__jennySetBattery($charging, $batteryLevel);"
+        )
     }
 
     private fun registerScreenStateReceiver() {
@@ -561,6 +627,9 @@ class JennyOverlayController(private val context: Context) {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
         }
         runCatching { context.registerReceiver(powerStateReceiver, filter) }
             .onSuccess { screenReceiverRegistered = true }
@@ -619,6 +688,11 @@ class JennyOverlayController(private val context: Context) {
         secondTapCandidate = false
         lastTapUpMs = 0L
         glideToken = 0
+        easterTapCount = 0
+        easterWindowStartMs = 0L
+        lastCheerAtMs = 0L
+        charging = false
+        batteryLevel = 100
         unregisterScreenStateReceiver()
         unregisterDisplayListener()
         removeTarget()
@@ -708,6 +782,7 @@ class JennyOverlayController(private val context: Context) {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     pageAttempts = 0
                     seedPagePrefs()
+                    pushBatteryToPage()
                     pollArtAndPrefs()
                 }
             }
@@ -776,7 +851,8 @@ class JennyOverlayController(private val context: Context) {
         val view = petView ?: return
         val size = readSizePref()
         val color = readColorPref()
-        if (size == null && color == null) return
+        val haptics = readHapticsPref()
+        if (size == null && color == null && haptics == null) return
         var js = "(function(){try{"
         if (size != null) {
             js += "if(localStorage.getItem('jenny-mascotte-size')===null){" +
@@ -787,6 +863,11 @@ class JennyOverlayController(private val context: Context) {
             js += "var b=localStorage.getItem('jenny-mascotte-color');" +
                 "if(b===null){localStorage.setItem('jenny-mascotte-color','$on');" +
                 "return ('1'!=='$on');}"
+        }
+        if (haptics != null) {
+            val on = if (haptics) "1" else "0"
+            js += "if(localStorage.getItem('jenny-mascotte-haptics')===null){" +
+                "localStorage.setItem('jenny-mascotte-haptics','$on');}"
         }
         js += "return false;}catch(e){return false;}})()"
         view.evaluateJavascript(js) { raw ->
@@ -921,6 +1002,13 @@ class JennyOverlayController(private val context: Context) {
     private var glideRunnable: Runnable? = null
     private var glideToken = 0
     private var lastInteractionMs = 0L
+
+    // Easter egg (batch 4): conteggio dei tap singoli in una finestra mobile.
+    private var easterTapCount = 0
+    private var easterWindowStartMs = 0L
+
+    // Ultimo saluto "app in primo piano" (batch 4), per il rate-limit.
+    private var lastCheerAtMs = 0L
 
     @SuppressLint("ClickableViewAccessibility")
     private fun onPetTouch(event: MotionEvent): Boolean {
@@ -1083,6 +1171,7 @@ class JennyOverlayController(private val context: Context) {
                 cancelPendingPoke()
                 secondTapCandidate = false
                 lastTapUpMs = 0L
+                resetEasterTaps()
                 menuCloseTouch = false
                 if (longPressFired) {
                     longPressFired = false
@@ -1130,6 +1219,7 @@ class JennyOverlayController(private val context: Context) {
         longPressFired = false
         secondTapCandidate = false
         lastTapUpMs = 0L
+        resetEasterTaps()
         // Punto di presa = punto del tocco dentro la finestra.
         grabDx = downRawX - downLpX
         grabDy = downRawY - downLpY
@@ -1372,11 +1462,16 @@ class JennyOverlayController(private val context: Context) {
         if (secondTapCandidate && lastTapUpMs != 0L) {
             secondTapCandidate = false
             lastTapUpMs = 0L
+            resetEasterTaps()
             openMainApp()
             return
         }
         secondTapCandidate = false
         lastTapUpMs = now
+        // Easter egg: un tap singolo conta per la sequenza; al raggiungimento
+        // della soglia recordEasterTap cancella il poke in attesa e fa partire
+        // la celebrazione (nessun poke "strano" dopo il tap che la scatena).
+        if (recordEasterTap(now)) return
         cancelPendingPoke()
         val run = Runnable {
             pendingTapRunnable = null
@@ -1392,12 +1487,135 @@ class JennyOverlayController(private val context: Context) {
         pendingTapRunnable = null
     }
 
+    // --------------------------------------------- easter egg + cheer (batch 4)
+
+    /** Conteggia un tap singolo per l'easter egg: EASTER_TAP_COUNT tap
+     *  ravvicinati (finestra mobile EASTER_WINDOW_MS) scatenano la
+     *  celebrazione. Ritorna true se è scattata: il poke di QUEL tap non deve
+     *  partire (il tap è già servito a far festa). */
+    private fun recordEasterTap(now: Long): Boolean {
+        if (now - easterWindowStartMs > EASTER_WINDOW_MS) {
+            easterTapCount = 1
+            easterWindowStartMs = now
+            return false
+        }
+        easterTapCount++
+        if (easterTapCount >= EASTER_TAP_COUNT) {
+            easterTapCount = 0
+            easterWindowStartMs = 0L
+            cancelPendingPoke()
+            triggerEasterEgg()
+            return true
+        }
+        return false
+    }
+
+    /** Ogni gesto che non è un tap (drag, long-press, doppio tap, cancel)
+     *  azzera la sequenza. La finestra EASTER_WINDOW_MS fa da reset nel tempo. */
+    private fun resetEasterTaps() {
+        easterTapCount = 0
+        easterWindowStartMs = 0L
+    }
+
+    /** Celebrazione easter egg: pose rapide nella pagina (window.__jennyCelebrate)
+     *  + doppia vibrazione breve; poi ritorno a idle. Cancella il ritorno a
+     *  idle di una poke precedente, così la pagina non viene interrotta. */
+    private fun triggerEasterEgg() {
+        Log.i(TAG, "easter egg: ${EASTER_TAP_COUNT} tap ravvicinati")
+        settleRunnable?.let { mainHandler.removeCallbacks(it) }
+        settleRunnable = null
+        vibrate(VIBRATE_EASTER_MS)
+        mainHandler.postDelayed(
+            Runnable { vibrate(VIBRATE_EASTER_MS) },
+            VIBRATE_EASTER_GAP_MS
+        )
+        evalJs("window.__jennyCelebrate && window.__jennyCelebrate();")
+        val returnRun = Runnable {
+            settleRunnable = null
+            if (petView != null && phase == Phase.IDLE) applyPose("idle")
+        }
+        settleRunnable = returnRun
+        mainHandler.postDelayed(returnRun, EASTER_RETURN_IDLE_MS)
+    }
+
+    /** Saluto giocoso quando l'app host torna in primo piano (batch 4). È
+     *  l'equivalente più vicino — senza aggiungere permessi di sistema — a una
+     *  reazione alle notifiche in arrivo: in questa app non esiste un hook di
+     *  notifica raggiungibile dall'overlay (servirebbe un
+     *  NotificationListenerService, permesso speciale), quindi la visibilità
+     *  dell'app fa da segnale. Decide da solo se è appropriato: mascotte
+     *  visibile, a riposo, pagina sveglia (un pet messo a dormire
+     *  esplicitamente non viene svegliato), fuori dal risparmio energetico,
+     *  con i rate-limit CHEER_MIN_INTERVAL_MS / CHEER_MIN_QUIET_MS. */
+    fun cheerUp() {
+        if (petView == null || petParams == null) return
+        if (phase != Phase.IDLE || dragCommitted || touchActive) return
+        if (settleRunnable != null || menuOpen) return
+        if (energySaveActive()) return
+        val now = System.currentTimeMillis()
+        if (now - lastCheerAtMs < CHEER_MIN_INTERVAL_MS) return
+        if (lastInteractionMs != 0L && now - lastInteractionMs < CHEER_MIN_QUIET_MS) return
+        val view = petView ?: return
+        view.evaluateJavascript("window.__jennySleeping ? window.__jennySleeping() : false") { raw ->
+            if (petView == null || petParams == null) return@evaluateJavascript
+            // Pagina che dorme (anche sonno esplicito "Dormi"): niente saluto.
+            if (raw != null && raw.trim() == "true") return@evaluateJavascript
+            lastCheerAtMs = System.currentTimeMillis()
+            val pose = POKE_POSES[(Math.random() * POKE_POSES.size).toInt()]
+            applyPose(pose)
+            settleRunnable?.let { mainHandler.removeCallbacks(it) }
+            settleRunnable = null
+            val returnRun = Runnable {
+                settleRunnable = null
+                if (petView != null && phase == Phase.IDLE) applyPose("idle")
+            }
+            settleRunnable = returnRun
+            mainHandler.postDelayed(returnRun, POKE_RETURN_MS)
+        }
+    }
+
+    /** Vibrazione sottile (batch 4): nativa perché i gesti (tap singolo,
+     *  apertura menu, cambio dimensione) vivono nel controller. Rispetta la
+     *  preferenza overlay/haptics (default true) ed è sempre protetta: nessuna
+     *  eccezione deve uscire dalla gestione del tocco. */
+    @Suppress("DEPRECATION")
+    private fun vibrate(ms: Long) {
+        if (!hapticsPref()) return
+        val vibrator = runCatching {
+            context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }.getOrNull() ?: return
+        if (!vibrator.hasVibrator()) return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(
+                    VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
+            } else {
+                vibrator.vibrate(ms)
+            }
+        }
+    }
+
+    /** Preferenza "vibrazione sottile" applicata dalle Impostazioni: persistita
+     *  in overlay/haptics e rispecchiata in localStorage (chiave
+     *  jenny-mascotte-haptics, stesso schema di size/color). La pagina non
+     *  vibra: gli haptics sono nativi (poke, menu, cambio dimensione, easter
+     *  egg). */
+    private fun chooseHaptics(on: Boolean) {
+        overlayPrefs().edit().putBoolean(PREFS_HAPTICS, on).apply()
+        val mirror = if (on) "1" else "0"
+        evalJs(
+            "try{localStorage.setItem('jenny-mascotte-haptics', '$mirror');}catch(e){}"
+        )
+    }
+
     /** Tap singolo: breve reazione "viva" (pose ART già esistenti nella
      *  pagina, mai inventate), poi ritorno a idle. Il ritorno condivide il
      *  timer "settle": un nuovo tocco o un drag lo cancellano. */
     private fun poke() {
         if (petView == null || phase != Phase.IDLE) return
         if (touchActive || dragCommitted) return
+        vibrate(VIBRATE_POKE_MS)
         val pose = POKE_POSES[(Math.random() * POKE_POSES.size).toInt()]
         applyPose(pose)
         settleRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -1436,6 +1654,7 @@ class JennyOverlayController(private val context: Context) {
         cancelPendingPoke()
         secondTapCandidate = false
         lastTapUpMs = 0L
+        resetEasterTaps()
         stopGlide()
         openMenu()
     }
@@ -1448,6 +1667,7 @@ class JennyOverlayController(private val context: Context) {
      *  palcoscenico senza logica di UI. */
     private fun openMenu() {
         val view = petView ?: return
+        vibrate(VIBRATE_MENU_MS)
         val token = ++menuRequestToken
         // Evidenzia dimensione/colore VERI leggendoli dalla pagina (stessa
         // localStorage della SPA), non da una copia locale potenzialmente
@@ -1583,6 +1803,8 @@ class JennyOverlayController(private val context: Context) {
      *  resizeTo riclampa nella zona utile, rimette sul pavimento, riapplica il
      *  peek se parcheggiata e aggiorna la finestra. */
     private fun chooseSize(pref: String) {
+        // Haptics "cambio dimensione" solo se la dimensione cambia davvero.
+        if (pref != readSizePref()) vibrate(VIBRATE_SIZE_MS)
         overlayPrefs().edit().putString(PREFS_SIZE, pref).apply()
         evalJs("try{localStorage.setItem('jenny-mascotte-size', '$pref');}catch(e){}")
         val newPx = dp(SIZE_DP_BY_PREF[pref] ?: DEFAULT_SIZE_DP)

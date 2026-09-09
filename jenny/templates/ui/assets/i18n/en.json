@@ -222,6 +222,7 @@
     "overlaySection": "Overlay",
     "overlaySize": "Desktop pet size",
     "overlayColor": "Desktop pet color",
+    "overlayHaptics": "Desktop pet vibration (poke, menu, easter egg)",
     "overlayVisible": "Mascot above other apps",
     "overlayHint": "Jenny also lives outside the app as a tiny desktop pet: drag her, fling her and let her fall. To hide her, drop her on the \u2715 target that appears at the top while dragging.",
     "homeSection": "Home button",
