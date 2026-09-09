@@ -18,19 +18,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Recapture debug keystore (AGP-compatible)
+      - name: Use stable debug keystore from repo
         run: |
-          echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
           mkdir -p "$HOME/.android"
-          rm -f "$HOME/.android/debug.keystore"
-          keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -alias AndroidDebugKey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
-          cp "$HOME/.android/debug.keystore" "$GITHUB_WORKSPACE/debug.keystore"
-      - name: Upload debug keystore artifact (one-time capture)
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-keystore
-          path: debug.keystore
-          retention-days: 7
+          echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
+          cp android/app/debug.keystore "$HOME/.android/debug.keystore"
       - name: Build debug APK
         working-directory: android
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
