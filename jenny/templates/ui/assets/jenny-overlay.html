@@ -280,6 +280,10 @@
   /* Letto da Kotlin a polling finché i piedi non sono misurati. */
   window.__jennyArtTop = function () { return idleBox ? idleBox.t : -1; };
   window.__jennyArtBottom = function () { return idleBox ? idleBox.b : -1; };
+  /* Idem in orizzontale: serve al controller per il parcheggio sui bordi
+     (tenere visibile >= 1/3 della sprite). idleBox contiene già l/r. */
+  window.__jennyArtLeft = function () { return idleBox ? idleBox.l : -1; };
+  window.__jennyArtRight = function () { return idleBox ? idleBox.r : -1; };
   window.__jennyPrefs = function () {
     return { size: mascotSize(), color: colorEnabled() };
   };

@@ -25,6 +25,7 @@ import android.webkit.WebViewClient
 import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 import org.json.JSONObject
 
@@ -66,9 +67,10 @@ class JennyOverlayController(private val context: Context) {
         private const val TAP_TIMEOUT_MS = 340L
         private const val SIT_GROUND_MS = 650L
 
-        // Edge peek-hide (park mostly off-screen).
+        // Edge peek-hide (park mostly off-screen, art-aware: resta sempre
+        // visibile >= 1/3 della sprite disegnata e uno sliver minimo toccabile).
         private const val PARK_BAND_DP = 36
-        private const val PEEK_SLIVER_DP = 20
+        private const val PEEK_MIN_SLIVER_DP = 44
 
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
@@ -116,6 +118,8 @@ class JennyOverlayController(private val context: Context) {
     // Frazioni del riquadro disegnato rispetto alla finestra quadrata.
     private var artTopFrac = 0f         // 0 finché non misurato
     private var artFeetFrac = 1f        // 1 = finestra piena finché non misurato
+    private var artLeftFrac = -1f       // -1 finché non misurato (fallback 0)
+    private var artRightFrac = -1f      // -1 finché non misurato (fallback 1)
 
     // Stato del volo.
     private var posX = 0f
@@ -344,15 +348,18 @@ class JennyOverlayController(private val context: Context) {
         )
     }
 
-    /** Legge posizione dei piedi (artFeetFrac), testa (artTopFrac) e la
-     *  preferenza di dimensione scelta nella SPA (stessa localStorage). */
+    /** Legge la posizione del riquadro disegnato (piedi/artFeetFrac, testa/
+     *  artTopFrac, bordi orizzontali/artLeftFrac-artRightFrac) e la preferenza
+     *  di dimensione scelta nella SPA (stessa localStorage). */
     private fun pollArtAndPrefs() {
         if (petView == null) return
         val js = (
             "(function(){var t=(window.__jennyArtTop?window.__jennyArtTop():-1);" +
                 "var b=(window.__jennyArtBottom?window.__jennyArtBottom():-1);" +
+                "var l=(window.__jennyArtLeft?window.__jennyArtLeft():-1);" +
+                "var r=(window.__jennyArtRight?window.__jennyArtRight():-1);" +
                 "var s='sm';try{s=localStorage.getItem('jenny-mascotte-size')||'sm';}catch(e){}" +
-                "return {t:t,b:b,s:s};})()"
+                "return {t:t,b:b,l:l,r:r,s:s};})()"
             )
         petView?.evaluateJavascript(js) { raw ->
             runCatching {
@@ -360,16 +367,44 @@ class JennyOverlayController(private val context: Context) {
                 val obj = JSONObject(raw)
                 val b = obj.optDouble("b", -1.0)
                 val t = obj.optDouble("t", -1.0)
+                val l = obj.optDouble("l", -1.0)
+                val r = obj.optDouble("r", -1.0)
                 val sizePref = obj.optString("s", "sm")
                 val newSize = dp(SIZE_DP_BY_PREF[sizePref] ?: DEFAULT_SIZE_DP)
                 if (newSize != sizePx) resizeTo(newSize)
-                if (b >= 0.0 && t >= 0.0 && artFeetFrac != b.toFloat()) {
+                val measured = b >= 0.0 && t >= 0.0
+                if (measured) {
+                    // Riquadro orizzontale della sprite: accettato solo se valido
+                    // (frazioni in [0,1] e l <= r), altrimenti resta ignoto (-1) e
+                    // il parcheggio usa il fallback a tutta larghezza (0..1).
+                    val lf = l.toFloat()
+                    val rf = r.toFloat()
+                    if (lf in 0f..1f && rf in 0f..1f && lf <= rf) {
+                        artLeftFrac = lf
+                        artRightFrac = rf
+                    } else {
+                        artLeftFrac = -1f
+                        artRightFrac = -1f
+                    }
+                }
+                if (measured && artFeetFrac != b.toFloat()) {
                     artFeetFrac = b.toFloat().coerceIn(0.05f, 1f)
                     artTopFrac = t.toFloat().coerceIn(0f, 0.95f)
                     if (phase == Phase.IDLE) {
                         posY = floorTopY()
-                        applyWindow()
+                        if (parkedSide != 0) {
+                            // Misura appena arrivata con la mascotte parcheggiata:
+                            // ripete il posizionamento di peek col riquadro reale
+                            // (si corregge da solo rispetto al fallback iniziale).
+                            parkToSide(parkedSide)
+                        } else {
+                            applyWindow()
+                        }
                     }
+                } else if (measured && phase == Phase.IDLE && parkedSide != 0) {
+                    // Verticale già nota e invariata, ma si era parcheggiato prima
+                    // della misura orizzontale: riallinea comunque il peek.
+                    parkToSide(parkedSide)
                 }
             }
             if (artFeetFrac >= 1f && artPollCount < ART_POLL_MAX) {
@@ -688,16 +723,39 @@ class JennyOverlayController(private val context: Context) {
 
     // ---------------------------------------------- edge peek-hide (parcheggio)
 
-    /** Px nascosti fuori schermo quando la finestra è parcheggiata: resta
-     *  visibile solo uno sliver di PEEK_SLIVER_DP. */
-    private fun peekOffsetPx(): Int = max(0, sizePx - dp(PEEK_SLIVER_DP))
+    /** Offset massimo (px) con cui la finestra può sporgere fuori schermo sul
+     *  bordo indicato (side < 0 → sinistra, side > 0 → destra) restando visibile
+     *  almeno 1/3 del riquadro DISEGNATO della sprite (non del finestrino
+     *  trasparente). Con S = sizePx e aL/aR frazioni orizzontali dell'art nella
+     *  finestra (fallback 0/1 se ignote, artW = (aR - aL) * S):
+     *   - a sinistra (posX = -offset, a schermo resta la striscia destra della
+     *     finestra) l'art visibile è aR*S - offset: serve offset <= S*(aL+2aR)/3
+     *     perché resti esattamente artW/3;
+     *   - a destra (posX = maxX + offset, a schermo resta la striscia sinistra)
+     *     serve offset <= S*(3 - 2aL - aR)/3.
+     *  Il risultato è limitato a S - PEEK_MIN_SLIVER_DP: lo sliver a schermo
+     *  resta comunque un bersaglio toccabile. Con art ignota (fallback 0..1) il
+     *  limite è S*2/3: un terzo della finestra resta visibile (sicuro). */
+    private fun peekOffsetPx(side: Int): Int {
+        val s = sizePx
+        var aL = if (artLeftFrac in 0f..1f) artLeftFrac else 0f
+        var aR = if (artRightFrac in 0f..1f) artRightFrac else 1f
+        if (aL > aR) { aL = 0f; aR = 1f }
+        val artBound = if (side < 0) {
+            s * (aL + 2f * aR) / 3f
+        } else {
+            s * (3f - 2f * aL - aR) / 3f
+        }
+        val sliverCap = (s - dp(PEEK_MIN_SLIVER_DP)).toFloat()
+        return max(0, min(artBound, sliverCap).roundToInt())
+    }
 
     /** Porta la mascotte in posizione di peek sul bordo indicato (side < 0 →
-     *  sinistra, side > 0 → destra): posX = -(sizePx - sliver) o
-     *  posX = maxX + (sizePx - sliver). y resta sul pavimento (già a riposo). */
+     *  sinistra, side > 0 → destra): posX = -offset o posX = maxX + offset con
+     *  offset = peekOffsetPx(side) (limite art-safe). y resta sul pavimento. */
     private fun parkToSide(side: Int) {
         val maxX = max(0, screenW - sizePx)
-        val offset = peekOffsetPx()
+        val offset = peekOffsetPx(side)
         parkedSide = if (side < 0) -1 else 1
         posX = if (side < 0) -offset.toFloat() else (maxX + offset).toFloat()
         posY = floorTopY()
@@ -716,14 +774,26 @@ class JennyOverlayController(private val context: Context) {
     }
 
     /** Da chiamare SOLO a riposo (settleFlight o rilascio debole sul pavimento),
-     *  mai in volo: non parcheggia mai la mascotte (nemmeno in parte) fuori
-     *  schermo. Se dopo il riposo la finestra è finita oltre un bordo laterale
-     *  viene riportata dentro, accostata al bordo e del tutto visibile
-     *  (x in [0, maxX]); altrimenti resta dov'è. */
+     *  mai in volo. Se la finestra si è fermata nella fascia di bordo
+     *  (PARK_BAND_DP) viene parcheggiata in peek su quel lato (quasi del tutto
+     *  fuori schermo, ma con >= 1/3 del riquadro disegnato ancora visibile e uno
+     *  sliver minimo toccabile); altrimenti resta dov'è, del tutto dentro lo
+     *  schermo (x in [0, maxX]). */
     private fun maybeParkAfterSettle() {
         val maxX = max(0, screenW - sizePx)
-        posX = posX.coerceIn(0f, maxX.toFloat())
-        applyWindow()
+        val band = dp(PARK_BAND_DP)
+        val side = when {
+            posX <= band -> -1
+            posX >= maxX - band -> 1
+            else -> 0
+        }
+        if (side != 0) {
+            parkToSide(side)
+        } else {
+            parkedSide = 0
+            posX = posX.coerceIn(0f, maxX.toFloat())
+            applyWindow()
+        }
     }
 
     /** Rilascio di un drag partito da parcheggiato: il volo è soppresso. Se la
@@ -815,10 +885,13 @@ class JennyOverlayController(private val context: Context) {
     private fun applyWindow() {
         val lp = petParams ?: return
         val maxX = max(0, screenW - sizePx)
-        // Invariante: la finestra resta sempre del tutto dentro lo schermo in
-        // orizzontale, per ogni movimento (drag, volo, riposo). Niente
-        // parcheggio fuori schermo: x è sempre in [0, maxX].
-        val x = posX.roundToInt().coerceIn(0, maxX)
+        // Invariante: la finestra resta del tutto dentro lo schermo in
+        // orizzontale, per ogni movimento (drag, volo, riposo) — tranne quando
+        // è parcheggiata su un bordo: in quel caso può uscire SOLO fino al
+        // limite art-safe di peekOffsetPx (>= 1/3 della sprite ancora visibile e
+        // sliver minimo toccabile). Nessun altro percorso la porta più fuori.
+        val allowed = if (parkedSide != 0) peekOffsetPx(parkedSide) else 0
+        val x = posX.roundToInt().coerceIn(-allowed, maxX + allowed)
         // In verticale la finestra resta tra il bordo alto e la posizione di
         // riposo sul pavimento (piedi su floorLineY): la mascotte è sempre
         // visibile, senza cambiare la fisica del pavimento.
