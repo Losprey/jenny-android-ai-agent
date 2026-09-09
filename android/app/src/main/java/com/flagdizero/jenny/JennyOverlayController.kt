@@ -127,7 +127,8 @@ class JennyOverlayController(private val context: Context) {
         private const val PREFS_POS_X = "overlay/posX"
         private const val PREFS_POS_Y = "overlay/posY"
         private const val PREFS_PARKED_SIDE = "overlay/parkedSide"
-        // Scelte del menu rapido: mirror delle localStorage della pagina
+        // Scelte del menu rapido e delle Impostazioni dell'app: mirror delle
+        // localStorage della pagina
         // (ripristino se lo storage della WebView viene cancellato).
         // Dimensione: "sm"|"md"|"lg" (chiave assente = default della pagina);
         // colore: true = sprite -color.
@@ -144,6 +145,12 @@ class JennyOverlayController(private val context: Context) {
         private const val PAGE_RETRY_MS = 900L
         private const val ART_POLL_MS = 120L
         private const val ART_POLL_MAX = 40
+
+        // Istanza viva dell'overlay (un solo controller per processo: lo
+        // possiede GatewayService). Le Impostazioni dell'app la usano per
+        // applicare al volo taglia/colore alla mascotte gia visibile.
+        @Volatile
+        var live: JennyOverlayController? = null
     }
 
     private enum class Phase { NONE, IDLE, DRAG, FLY }
@@ -269,6 +276,22 @@ class JennyOverlayController(private val context: Context) {
     /** Ferma l'overlay alla morte del service, senza toccare la preferenza. */
     fun stop() {
         teardown()
+    }
+
+    /** Applica subito i visual scelti dalle Impostazioni dell'app a una
+     *  mascotte gia visibile: stesso percorso del menu rapido (persiste la
+     *  preferenza, aggiorna la localStorage della pagina, riclampa la
+     *  geometria / ricarica la posa corrente). Se l'overlay non e avviato non
+     *  fa nulla: la pagina usera le preferenze gia scritte al prossimo avvio. */
+    fun applyExternalVisuals(size: String? = null, color: Boolean? = null) {
+        if (petView == null || (size == null && color == null)) return
+        val s = size
+        val c = color
+        mainHandler.post {
+            if (petView == null) return@post
+            if (s != null && s in SIZE_DP_BY_PREF) chooseSize(s)
+            if (c != null) chooseColor(c)
+        }
     }
 
     // ----------------------------------------------------------- preferenze
@@ -580,6 +603,7 @@ class JennyOverlayController(private val context: Context) {
         persistState()
         dismissMenu()
         phase = Phase.NONE
+        if (live === this) live = null
         lastFrameNs = 0L
         mainHandler.removeCallbacksAndMessages(null)
         artPollRunnable = null
@@ -699,6 +723,7 @@ class JennyOverlayController(private val context: Context) {
 
         wm.addView(web, lp)
         petView = web
+        live = this // le Impostazioni dell'app possono applicare al volo i visual
         petParams = lp
         pageAttempts = 0
         restoreSavedPosition()

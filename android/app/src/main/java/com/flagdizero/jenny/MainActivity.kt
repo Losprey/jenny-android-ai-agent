@@ -1169,6 +1169,52 @@ class MainActivity : AppCompatActivity() {
             return false
         }
 
+        // ── Mascotte overlay: taglia e colore (batch 3) ──
+        // Stesse chiavi del menu rapido della mascotte: prefs "overlay" con
+        // overlay/size ("sm"|"md"|"lg", assente => "sm") e overlay/color
+        // (bool, assente => true). Ogni setter persiste la preferenza e poi
+        // applica al volo la modifica alla mascotte gia visibile tramite il
+        // controller vivo (JennyOverlayController.live, posseduto da
+        // GatewayService); se l'overlay non e attivo la preferenza basta: la
+        // pagina la usera come seed al prossimo avvio.
+
+        private val overlaySizes = setOf("sm", "md", "lg")
+
+        @JavascriptInterface
+        fun overlayMascotSize(): String {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            val v = prefs.getString("overlay/size", null)
+            return if (v != null && v in overlaySizes) v else "sm"
+        }
+
+        @JavascriptInterface
+        fun overlayMascotColor(): Boolean {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            return prefs.getBoolean("overlay/color", true)
+        }
+
+        @JavascriptInterface
+        fun setOverlayMascotSize(size: String?): String {
+            val id = if (size != null && size in overlaySizes) size else null
+            if (id == null) return overlayMascotSize()
+            getSharedPreferences("overlay", MODE_PRIVATE)
+                .edit().putString("overlay/size", id).apply()
+            runOnUiThread {
+                JennyOverlayController.live?.applyExternalVisuals(size = id)
+            }
+            return id
+        }
+
+        @JavascriptInterface
+        fun setOverlayMascotColor(on: Boolean): Boolean {
+            getSharedPreferences("overlay", MODE_PRIVATE)
+                .edit().putBoolean("overlay/color", on).apply()
+            runOnUiThread {
+                JennyOverlayController.live?.applyExternalVisuals(color = on)
+            }
+            return on
+        }
+
         // ── Backup e ripristino ──
 
         /** Apre il picker SAF "salva con nome" per il backup già preparato dal

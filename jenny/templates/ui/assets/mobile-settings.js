@@ -1475,12 +1475,50 @@ export class SettingsController {
         typeof nat.setOverlayMascotVisible === 'function') {
       let overlayVisible = false;
       try { overlayVisible = !!nat.overlayMascotVisible(); } catch (e) { /* noop */ }
+      // Taglia e colore della mascotte overlay (batch 3). Valore mostrato:
+      // la localStorage condivisa (stessa origin del gateway, usata anche
+      // dalla mascotte nella chat); se è stata cancellata si ripiega sulla
+      // preferenza nativa overlay/size|overlay/color, il seed del prossimo
+      // avvio (chiave assente => "sm" / true).
+      let overlaySize = 'sm';
+      let overlayColor = true;
+      try {
+        if (typeof nat.overlayMascotSize === 'function') {
+          const s = nat.overlayMascotSize();
+          if (s in MASCOT_SIZES) overlaySize = s;
+        }
+        if (typeof nat.overlayMascotColor === 'function') {
+          overlayColor = !!nat.overlayMascotColor();
+        }
+      } catch (e) { /* noop */ }
+      const rawOverlaySize = localStorage.getItem('jenny-mascotte-size');
+      if (rawOverlaySize in MASCOT_SIZES) overlaySize = rawOverlaySize;
+      const rawOverlayColor = localStorage.getItem('jenny-mascotte-color');
+      if (rawOverlayColor === '1' || rawOverlayColor === '0') overlayColor = rawOverlayColor === '1';
+      const overlayOff = overlayVisible ? '' : ' disabled';
+      const overlaySizeButtons = Object.keys(MASCOT_SIZES).map(id =>
+        `<button class="settings-seg-btn${id === overlaySize ? ' active' : ''}" data-overlay-size="${id}"${overlayOff}>
+          ${escapeHtml(sizeLabels[id])}
+          ${id === overlaySize ? '<i class="ti ti-check"></i>' : ''}
+        </button>`
+      ).join('');
       overlayBlock = `
       <div class="theme-strip-eyebrow">${i18n.t('settings.overlaySection')}</div>
       <div class="settings-field settings-toggle-row">
         <label class="settings-label">${i18n.t('settings.overlayVisible')}</label>
         <label class="toggle-switch">
           <input type="checkbox" id="overlay-visible-toggle" ${overlayVisible ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="settings-field"${overlayVisible ? '' : ' data-settings-off'}>
+        <label class="settings-label">${i18n.t('settings.overlaySize')}</label>
+        <div class="settings-seg">${overlaySizeButtons}</div>
+      </div>
+      <div class="settings-field settings-toggle-row"${overlayVisible ? '' : ' data-settings-off'}>
+        <label class="settings-label">${i18n.t('settings.overlayColor')}</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="overlay-color-toggle" ${overlayColor ? 'checked' : ''}${overlayOff}>
           <span class="toggle-slider"></span>
         </label>
       </div>
@@ -2349,6 +2387,33 @@ export class SettingsController {
         } catch (e) {
           overlayToggle.checked = !target;
         }
+      });
+    }
+
+    // Mascotte overlay: taglia e colore (batch 3). Ogni scelta aggiorna PRIMA
+    // la localStorage condivisa con la pagina della mascotte overlay (stessa
+    // origin del gateway, chiavi jenny-mascotte-*), poi persiste la preferenza
+    // nativa (overlay/size, overlay/color — usata come seed se lo storage
+    // WebView viene cancellato) e la applica alla mascotte già visibile
+    // (ridimensionamento / refresh della posa, stesso percorso del menu
+    // rapido). Se l'overlay non è attivo la localStorage scritta qui basta:
+    // la pagina la userà all'avvio, quindi nessun valore stantio resta indietro.
+    this.contentEl.querySelectorAll('[data-overlay-size]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.overlaySize;
+        setMascotSize(id);
+        if (nativeOverlay && typeof nativeOverlay.setOverlayMascotSize === 'function') {
+          try { nativeOverlay.setOverlayMascotSize(id); } catch (e) { /* noop */ }
+        }
+        this.render();
+      });
+    });
+    const overlayColorToggle = this.contentEl.querySelector('#overlay-color-toggle');
+    if (overlayColorToggle && nativeOverlay && typeof nativeOverlay.setOverlayMascotColor === 'function') {
+      overlayColorToggle.addEventListener('change', () => {
+        const on = overlayColorToggle.checked;
+        setMascotColor(on);
+        try { nativeOverlay.setOverlayMascotColor(on); } catch (e) { /* noop */ }
       });
     }
 
