@@ -23,6 +23,8 @@ const ART = {
   side: '/html-mobile/assets/jenny-side.webp',
   think: '/html-mobile/assets/jenny-think.webp',
   sideTalk: '/html-mobile/assets/jenny-side-talk.webp',
+  hello1: '/html-mobile/assets/jenny-hello1.webp',
+  hello2: '/html-mobile/assets/jenny-hello2.webp',
 };
 
 /* Parlato animato: coppie [bocca chiusa, bocca aperta] per posa. Nei sorgenti
@@ -72,6 +74,16 @@ const MOOD_HOLD_MS = 12000; // quanto dura una faccia prima di tornare idle
 /* Livello 0, gratis: un pensa che dura più di così diventa preoccupata, senza
    chiedere niente a nessuno. Si disarma al primo frame che cambia stato. */
 const MOOD_WORRY_AFTER_MS = 20000;
+
+/* ── Saluto al ritorno ──
+   Quando la pagina torna in primo piano dopo un'assenza lunga e Jenny è
+   accucciata sul bordo (docked), fa una breve posa di saluto (v. _maybeGreet).
+   Solo pose preesistenti (hello1, e hello2 quando esiste), nessuna arte nuova. */
+const GREET_AWAY_MIN_MS = 60000; // assenza minima (ms) prima del saluto
+const GREET_FRAME_MS = 800; // permanenza su ogni posa del saluto (~700-900ms)
+// Pose del saluto, nell'ordine. La sequenza si chiude tornando alla posa di
+// riposo corrente (side): non è uno stato, non tocca _agentState/_mood/turni.
+const GREET_HELLO_POSES = [ART.hello1, ART.hello2];
 
 /* ── Volo Pegman (fisica validata nella demo) ──
    Lo sprite pegman appare solo quando il drag e' commesso (hold oltre
@@ -164,6 +176,10 @@ export class JennyCompanion {
     this._moodTimer = null;
     this._worryTimer = null;
     this._lastClosedTurnId = null;
+    // Saluto al ritorno (v. _maybeGreet): seq invalida i frame ancora in coda;
+    // awaySince segna quando la pagina è uscita dal primo piano (una sola volta).
+    this._greet = { seq: 0, timer: null };
+    this._awaySince = null;
 
     this._buildDom();
     this._bindDrag();
@@ -171,7 +187,7 @@ export class JennyCompanion {
 
     // Preload dell'arte degli stati (think + frame del parlato): evita
     // frame vuoti al primo swap.
-    for (const src of [ART.think, ART.sideTalk, ...TALK_ANIMS.flat(), ...Object.values(MOOD_ART)]) {
+    for (const src of [ART.think, ART.sideTalk, ...GREET_HELLO_POSES, ...TALK_ANIMS.flat(), ...Object.values(MOOD_ART)]) {
       const im = new Image();
       im.src = poseUrl(src);
     }
@@ -207,6 +223,12 @@ export class JennyCompanion {
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', this._onResize);
     }
+
+    // Saluto al ritorno: niente rete, solo visibilità/focus (v. _trackAway).
+    this._onAway = () => this._trackAway();
+    document.addEventListener('visibilitychange', this._onAway);
+    window.addEventListener('focus', this._onAway);
+    window.addEventListener('blur', this._onAway);
     // La transizione di right (docked <-> out) sposta il rettangolo: riallinea
     // a fine slide, così l'esclusione combacia con la posizione finale.
     // Docked <-> out transiziona su 'right' a destra, su 'left' a sinistra
@@ -260,7 +282,10 @@ export class JennyCompanion {
     this.mc.className = 'jenny-mc';
     this.mc.dataset.state = 'ask';
     this.mc.innerHTML = `
-      <div class="jenny-mc-bubble"></div>
+      <div class="jenny-mc-bubble">
+        <span class="jenny-mc-text"></span>
+        <button type="button" class="jenny-mini-continue"></button>
+      </div>
       <div class="jenny-mc-think">…</div>
       <form class="jenny-mc-ask compose-row">
         <div class="compose-pill">
@@ -304,6 +329,8 @@ export class JennyCompanion {
     app.appendChild(this.el);
 
     this.bubble = this.mc.querySelector('.jenny-mc-bubble');
+    this.bubbleText = this.mc.querySelector('.jenny-mc-text');
+    this.continueBtn = this.mc.querySelector('.jenny-mini-continue');
     this.askForm = this.mc.querySelector('.jenny-mc-ask');
     this.input = this.mc.querySelector('.jenny-mc-input');
     this.sendBtn = this.mc.querySelector('.jenny-mc-send');
@@ -313,10 +340,13 @@ export class JennyCompanion {
       this.sendBtn.disabled = !this.input.value.trim();
     });
 
-    // Stesso placeholder (e stessa lingua) della chat vera.
+    // Stesso placeholder (e stessa lingua) della chat vera; anche il
+    // «Continua nella chat» segue la lingua corrente.
     const syncPlaceholder = () => {
       const t = i18n.t('chat.placeholder');
       if (t && t !== 'chat.placeholder') this.input.placeholder = t;
+      const c = i18n.t('jenny.continueInChat');
+      if (c && c !== 'jenny.continueInChat') this.continueBtn.textContent = c;
     };
     i18n.onLocaleChange(syncPlaceholder);
     i18n.load(i18n.locale).then(syncPlaceholder).catch(() => {});
@@ -501,8 +531,91 @@ export class JennyCompanion {
     this._syncArt();
   }
 
+  /* ── Saluto al ritorno ──
+     Solo pose, nessuno stato: quando la pagina torna visibile/focus dopo
+     GREET_AWAY_MIN_MS lontana e Jenny è a riposo sul bordo (docked: non out,
+     non mini, non onboarding/chat, agente idle e nessun turno in corso) fa un
+     breve saluto: hello1 (+ hello2, quando entrambe esistono in ART), poi
+     torna a 'side'. Non tocca umore, parlato né turn-tracking (_mood,
+     _pendingTurn, _turnActive, _agentState restano intatti); si ferma al primo
+     pointerdown sul duo (v. _bindDrag) e a ogni cambio di modalità (v. qui
+     sotto in setMode). Con prefers-reduced-motion non parte proprio. */
+
+  _trackAway() {
+    const now = Date.now();
+    if (document.hidden || !document.hasFocus()) {
+      // Lontana (nascosta o blur): segna l'inizio dell'assenza — una sola
+      // volta — e interrompe un saluto a metà riallineando l'arte allo stato
+      // (side): non deve riprendere da solo più tardi.
+      if (this._awaySince === null) this._awaySince = now;
+      if (this._greet.timer) {
+        this._stopGreeting();
+        this._syncArt();
+      }
+      return;
+    }
+    // Tornata visibile / focus: se l'assenza è durata abbastanza, saluta.
+    if (this._awaySince !== null) {
+      if (now - this._awaySince >= GREET_AWAY_MIN_MS) this._maybeGreet();
+      this._awaySince = null;
+    }
+  }
+
+  _greetEligible() {
+    if (document.hidden || !document.hasFocus()) return false;
+    if (this._reducedMotion) return false;
+    const cl = this.el.classList;
+    if (cl.contains('hidden-mode')) return false; // mascotte nascosta
+    if (cl.contains('out') || cl.contains('mini')) return false; // solo docked
+    if (this.mode === 'onboarding' || this.mode === 'chat') return false;
+    if (cl.contains('flying') || cl.contains('dragging')) return false;
+    if (this._agentState !== 'idle') return false;
+    if (this._turnActive || this._pendingTurn || this.awaiting) return false;
+    if (this._talk.timer || this._mood) return false;
+    if (this.mc.classList.contains('open')) return false;
+    return true;
+  }
+
+  _maybeGreet() {
+    if (this._greet.timer || !this._greetEligible()) return;
+    const seq = ++this._greet.seq;
+    let i = 0;
+    const next = () => {
+      if (this._greet.seq !== seq) return; // interrotto altrove (_stopGreeting)
+      if (!this._greetEligible()) {
+        // Nel frattempo lo stato è cambiato: fermati e riallinea l'arte a ciò
+        // che lo stato corrente richiede (side/idle/think/…); _syncArt non
+        // tocca parlato in corso né pose di umore, quindi non pesta niente.
+        this._stopGreeting();
+        this._syncArt();
+        return;
+      }
+      if (i < GREET_HELLO_POSES.length) {
+        this._setSrc(poseUrl(GREET_HELLO_POSES[i]));
+        i += 1;
+        this._greet.timer = setTimeout(next, GREET_FRAME_MS);
+      } else {
+        // Sequenza finita: posa di riposo e via.
+        this._greet.timer = null;
+        this._setArt('side');
+      }
+    };
+    next();
+  }
+
+  _stopGreeting() {
+    this._greet.seq += 1;
+    if (this._greet.timer) {
+      clearTimeout(this._greet.timer);
+      this._greet.timer = null;
+    }
+  }
+
   setMode(mode) {
     this.mode = mode;
+    // Un cambio modalità ridisegna l'arte da sé (più sotto): un frame di
+    // saluto ancora in coda la sovrascriverebbe, quindi fermalo subito.
+    this._stopGreeting();
     this._agentState = 'idle';
     this._turnActive = false;
     this._streamTurnId = null;
@@ -878,6 +991,7 @@ export class JennyCompanion {
 
     this.el.addEventListener('pointerdown', (e) => {
       dragging = true;
+      this._stopGreeting(); // un pointer su Jenny interrompe subito il saluto, se in corso
       moved = false;
       dragStarted = false;
       startEvent = e;
@@ -1032,7 +1146,7 @@ export class JennyCompanion {
     this.scrim.classList.remove('open');
     this.mc.classList.remove('open');
     this.mc.dataset.state = 'ask';
-    this.bubble.textContent = '';
+    this.bubbleText.textContent = '';
     this._deltaBuffer = '';
     this.input.value = '';
     this.sendBtn.disabled = true;
@@ -1055,6 +1169,17 @@ export class JennyCompanion {
       this.sendBtn.disabled = true;
       this.input.blur();
       this._send(text);
+    });
+
+    // «Continua nella chat» (v. .jenny-mini-continue): chiude la minichat e
+    // porta la sezione chat sulla conversazione corrente. La porta è la stessa
+    // che la chat usa per gli ingressi proattivi (mobile-app.js#openChat). Se
+    // un turno è ancora a metà, il resto dello stream finisce normalmente in
+    // chat (v. _handleChatStream/_pendingTurn): qui non si tocca il flag.
+    this.continueBtn.addEventListener('click', () => {
+      if (typeof window.mobileApp?.openChat !== 'function') return;
+      this._closeMini();
+      window.mobileApp.openChat();
     });
   }
 
@@ -1330,7 +1455,7 @@ export class JennyCompanion {
   _showReply(text) {
     if (!this.mc.classList.contains('open')) return;
     this._setAgentState('talking');
-    this.bubble.textContent = text;
+    this.bubbleText.textContent = text;
     this.mc.dataset.state = 'reply';
     this._replyShown = true;
   }

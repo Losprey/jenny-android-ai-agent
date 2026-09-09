@@ -655,7 +655,8 @@
     "workingReply": "I'm still working on it… you'll find the rest in chat ✿",
     "connectionError": "Cannot send: check your connection.",
     "genericError": "Something went wrong.",
-    "codeTag": "[code]"
+    "codeTag": "[code]",
+    "continueInChat": "Continue in chat"
   },
   "themes": {
     "placeholder": "Write to Jenny…",
