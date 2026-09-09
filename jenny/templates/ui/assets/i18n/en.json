@@ -224,6 +224,7 @@
     "overlayColor": "Desktop pet color",
     "overlayHaptics": "Desktop pet vibration (poke, menu, easter egg)",
     "overlayAutoPark": "AutoPark (half-hidden at the screen edge when idle)",
+    "overlaySmartHide": "Smart hide (steps aside while a video/app is playing fullscreen)",
     "overlayVisible": "Mascot above other apps",
     "overlayHint": "Jenny also lives outside the app as a tiny desktop pet: drag her, throw her sideways toward the screen edge (with AutoPark she stops there half-hidden and peeks out) or let her fall. To hide her, drop her on the \u2715 target that appears at the top while dragging, or swipe her up and off the screen.",
     "homeSection": "Home button",

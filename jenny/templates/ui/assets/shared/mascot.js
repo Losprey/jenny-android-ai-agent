@@ -18,6 +18,7 @@ const COLOR_KEY = 'jenny-mascotte-color';
 const SIZE_KEY = 'jenny-mascotte-size';
 const HAPTICS_KEY = 'jenny-mascotte-haptics'; // batch 4: vibrazione overlay
 const AUTOPARK_KEY = 'jenny-mascotte-autopark'; // batch 5: AutoPark overlay
+const SMARTHIDE_KEY = 'jenny-mascotte-smarthide'; // batch 6: ritiro smart (video fullscreen)
 
 /** Lato del canvas quadrato per ogni taglia. Il default è 'sm'; la geometria
  *  in mobile-style.css deriva tutta da --jenny-size, quindi qui basta
@@ -103,6 +104,24 @@ export function mascotAutoPark() {
 
 export function setMascotAutoPark(on) {
   localStorage.setItem(AUTOPARK_KEY, on ? '1' : '0');
+  return !!on;
+}
+
+/** Ritiro smart dell'overlay pet (batch 6): quando è attivo e c'è un
+ *  video/app a schermo intero davanti (segnale osservabile senza permessi:
+ *  audio attivo del sistema) la mascotte si ritira da sola e torna quando
+ *  il media smette. Preferenza client-side come le altre (localStorage); il
+ *  controller nativo la legge dal suo pref overlay/smartHide, mantenuto
+ *  allineato dalle Impostazioni. Volutamente NESSUN 'mascotchange': non è
+ *  un aspetto della companion, e un re-render della chat non serve. */
+export function mascotSmartHide() {
+  const v = localStorage.getItem(SMARTHIDE_KEY);
+  if (v === null) return true; // default: attivo
+  return v === '1';
+}
+
+export function setMascotSmartHide(on) {
+  localStorage.setItem(SMARTHIDE_KEY, on ? '1' : '0');
   return !!on;
 }
 

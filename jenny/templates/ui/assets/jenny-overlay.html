@@ -364,14 +364,23 @@
       }
       return;
     }
+    // Batch 6 — umore: da felice in su le pose "vive" sono più frequenti;
+    // da stanca in giù niente sguardi né "toeletta": solo micro-movimenti
+    // e riposo. Sempre e solo pose già esistenti.
     var roll = Math.random();
-    if (roll < 0.30) {
+    var happyP = moodValue >= 2 ? 0.50 : (moodValue >= 1 ? 0.40 : 0.30);
+    if (roll < happyP) {
       // Breve posa "viva" già esistente, poi ritorno all'idle.
       lifeFlash(['hello1', 'hello2', 'think']);
       return;
     }
-    if (roll < 0.48) { lookAround(); return; }
-    if (roll < 0.56) { groomShake(); return; }
+    if (moodValue < 0) {            // stanca/assonnata: resta quieta
+      applyMicro();
+      scheduleLifeNext();
+      return;
+    }
+    if (roll < happyP + 0.18) { lookAround(); return; }
+    if (roll < happyP + 0.26) { groomShake(); return; }
     applyMicro();
     scheduleLifeNext();
   }
@@ -683,6 +692,31 @@
     }
   };
 
+  /* ---- Batch 6: umore spinto dal controller Kotlin ----
+     Interi -2..+2, stesso modello del controller (vedi companion):
+       +2 eccitata (lancio appena fatto)   +1 felice (poke/carica/saluto)
+        0 neutra    -1 stanca (batteria bassa / risparmio energetico)
+       -2 assonnata (notte fonda lasciata in pace)
+     La pagina usa l'umore SOLO per orientare ritmi e scelte che esistono
+     gia: micro-vita idle, frequenza del sonno. Nessuna pose nuova, nessun
+     timer di sistema nuovo: il controller ricalcola da solo e spinge qui i
+     cambi. ---- */
+  var moodValue = 0;             // ultimo umore noto (-2..+2)
+  window.__jennySetMood = function (m) {
+    if (!isFinite(m)) return;
+    m = Math.max(-2, Math.min(2, Math.round(m)));
+    if (m === moodValue) return;
+    moodValue = m;
+    // Umore basso a riposo: riprogramma subito l'eventuale sonno (dorme
+    // prima; stesse pose del sonno normale). Umore alto lo allunga:
+    // effectiveSleepAfter() tiene conto di moodValue.
+    if (!sleeping && activePose === 'idle' && prefs.sleep && !document.hidden) {
+      clearSleepTimer();
+      scheduleSleep();
+    }
+  };
+  window.__jennyMood = function () { return moodValue; };
+
   function dayKey() {
     var d = new Date();
     return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
@@ -753,6 +787,13 @@
     if (batteryState && !batteryState.charging &&
         batteryState.level <= BATTERY_LOW_PERCENT) {
       base = Math.min(base, 8000);
+    }
+    // Batch 6 — umore: stanca/assonnata dorme prima, felice/eccitata
+    // resiste di più (il controller spinge il mood con __jennySetMood).
+    if (moodValue <= -1) {
+      base = Math.min(base, 12000);
+    } else if (moodValue >= 1) {
+      base = Math.max(base, 45000);
     }
     if (h >= 20 && h < 23) {
       base = Math.min(base, Math.round(SLEEP_AFTER_MS * (1 - (h - 19) * 0.15)));

@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.hardware.display.DisplayManager
+import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -132,6 +133,50 @@ class JennyOverlayController(private val context: Context) {
         private const val CHEER_MIN_INTERVAL_MS = 60_000L
         private const val CHEER_MIN_QUIET_MS = 20_000L
 
+        // ---- Batch 6: umore della mascotte ----
+        // Modello esplicito su scala intera -2..+2 (la pagina overlay lo
+        // riceve con window.__jennySetMood e lo usa solo per orientare pose
+        // e ritmi che esistono gia):
+        //   +2 EXCITED - gesto deciso appena successo (lancio/volo);
+        //   +1 HAPPY   - interazione recente (poke, saluto, carica);
+        //    0 NEUTRAL - riposo (deriva naturale);
+        //   -1 TIRED   - batteria bassa o risparmio energetico attivo;
+        //   -2 SLEEPY  - notte fonda con la mascotte lasciata in pace.
+        // Fonti: SOLO segnali gia noti al controller (tocco, gesti, carica,
+        // batteria, risparmio energetico, ora locale, idle): nessun listener
+        // nuovo. Deriva: senza eventi di rinforzo per MOOD_DECAY_MS l'umore
+        // torna a NEUTRAL da solo (timer periodico batch 6).
+        private const val MOOD_EXCITED = 2
+        private const val MOOD_HAPPY = 1
+        private const val MOOD_NEUTRAL = 0
+        private const val MOOD_TIRED = -1
+        private const val MOOD_SLEEPY = -2
+        private const val MOOD_DECAY_MS = 5 * 60_000L
+        private const val MOOD_LONG_IDLE_MS = 10 * 60_000L
+        private const val MOOD_LATE_NIGHT_START = 22
+        private const val MOOD_LATE_NIGHT_END = 6
+
+        // ---- Batch 6: smart hide ----
+        // Preferenza overlay/smartHide (default true) + timer periodico
+        // condiviso: ogni BATCH6_TICK_MS si ricalcola l'umore; ogni
+        // SMART_HIDE_POLL_STEPS tick si chiede al sistema se c'e audio attivo.
+        // Perche proprio l'audio: senza permessi di sistema (niente
+        // AccessibilityService ne UsageStats, fuori scope) l'unico segnale
+        // osservabile che un'app/video a schermo intero e davanti all'overlay
+        // e la riproduzione media attiva (AudioManager.isMusicActive non
+        // richiede permessi). Quando c'e, la mascotte si ritira; quando
+        // smette, torna da sola. Vedi smartHidePoll().
+        private const val BATCH6_TICK_MS = 3_000L
+        private const val SMART_HIDE_POLL_STEPS = 4
+        private const val SMART_HIDE_QUIET_MS = 15_000L
+
+        // Ultimo stato "app host in primo piano" noto (batch 6): seed per
+        // controller nati dopo l'ultimo cambio (onResume puo correre prima
+        // che il service crei l'overlay). Default true: l'overlay nasce dalla
+        // MainActivity in primo piano.
+        @Volatile
+        var overlayHostForeground = true
+
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
         private const val FLOOR_RESTITUTION = 0.36f
@@ -164,6 +209,8 @@ class JennyOverlayController(private val context: Context) {
         // Scritta dalla UI di impostazioni (batch 5, toggle AutoPark in
         // Impostazioni → Personalizzazione → Overlay); default = attivo.
         private const val PREFS_AUTO_PARK = "overlay/autoPark"
+        // Smart hide (batch 6): toggle nelle Impostazioni; default attivo.
+        private const val PREFS_SMART_HIDE = "overlay/smartHide"
         private const val PREFS_PEEK_MIN_SLIVER_DP = "overlay/peekMinSliverDp"
 
         private const val GATEWAY_HOST = "127.0.0.1"
@@ -319,20 +366,24 @@ class JennyOverlayController(private val context: Context) {
         color: Boolean? = null,
         haptics: Boolean? = null,
         autoPark: Boolean? = null,
+        smartHide: Boolean? = null,
     ) {
         if (petView == null ||
-            (size == null && color == null && haptics == null && autoPark == null)
+            (size == null && color == null && haptics == null && autoPark == null &&
+                smartHide == null)
         ) return
         val s = size
         val c = color
         val h = haptics
         val a = autoPark
+        val sh = smartHide
         mainHandler.post {
             if (petView == null) return@post
             if (s != null && s in SIZE_DP_BY_PREF) chooseSize(s)
             if (c != null) chooseColor(c)
             if (h != null) chooseHaptics(h)
             if (a != null) chooseAutoPark(a)
+            if (sh != null) chooseSmartHide(sh)
         }
     }
 
@@ -352,6 +403,13 @@ class JennyOverlayController(private val context: Context) {
      *  parcheggio al bordo dopo i riposi e al termine del "lancio"
      *  orizzontale del batch 5. */
     private fun autoParkPref(): Boolean = overlayPrefs().getBoolean(PREFS_AUTO_PARK, true)
+
+    /** Preferenza "smart hide" (overlay/smartHide, default true): quando e
+     *  attiva la mascotte si ritira da se se davanti c'e un'app/video a
+     *  schermo intero (segnale osservabile senza permessi: audio attivo).
+     *  La UI (batch 6) la scrive tramite MainActivity, come le altre scelte
+     *  del blocco Overlay. */
+    private fun smartHidePref(): Boolean = overlayPrefs().getBoolean(PREFS_SMART_HIDE, true)
 
     /** Sliver minimo di peek in dp (default 44, futura UI impostazioni). */
     private fun peekMinSliverDp(): Int {
@@ -605,6 +663,17 @@ class JennyOverlayController(private val context: Context) {
                 "charging=$charging batteryLevel=$batteryLevel lowBattery=$lowBattery"
         )
         pushBatteryToPage()
+        // Batch 6 — la carica/batteria/risparmio sono fonti di umore (modello
+        // in companion): carica → felice; batteria bassa o risparmio → stanca.
+        // Arrivano dagli stessi broadcast gia registrati qui (nessun listener
+        // nuovo).
+        if (charging) {
+            raiseMood(MOOD_HAPPY)
+        } else if (lowBattery || powerSaveMode) {
+            lowerMood(MOOD_TIRED)
+        } else {
+            recomputeMood()
+        }
         // Se il risparmio finisce mentre l'art non era ancora misurata, riparte
         // il polling (l'unica attività periodica del controller a riposo).
         if (!energySaveActive() && artFeetFrac >= 1f && petView != null) pollArtAndPrefs()
@@ -704,6 +773,13 @@ class JennyOverlayController(private val context: Context) {
         easterTapCount = 0
         easterWindowStartMs = 0L
         lastCheerAtMs = 0L
+        batch6TickRunnable = null
+        batch6TickCount = 0
+        smartHideMediaActive = false
+        smartHidden = false
+        mood = MOOD_NEUTRAL
+        lastMoodEventMs = 0L
+        lastMoodPush = -99
         charging = false
         batteryLevel = 100
         unregisterScreenStateReceiver()
@@ -796,6 +872,7 @@ class JennyOverlayController(private val context: Context) {
                     pageAttempts = 0
                     seedPagePrefs()
                     pushBatteryToPage()
+                    maybePushMood()
                     pollArtAndPrefs()
                 }
             }
@@ -821,6 +898,7 @@ class JennyOverlayController(private val context: Context) {
         applyWindow()
         loadPage()
         scheduleCuriosity()
+        scheduleBatch6Tick()
     }
 
     private fun loadPage() {
@@ -866,7 +944,10 @@ class JennyOverlayController(private val context: Context) {
         val color = readColorPref()
         val haptics = readHapticsPref()
         val autoPark = if (overlayPrefs().contains(PREFS_AUTO_PARK)) autoParkPref() else null
-        if (size == null && color == null && haptics == null && autoPark == null) return
+        val smartHide = if (overlayPrefs().contains(PREFS_SMART_HIDE)) smartHidePref() else null
+        if (size == null && color == null && haptics == null && autoPark == null &&
+            smartHide == null
+        ) return
         var js = "(function(){try{"
         if (size != null) {
             js += "if(localStorage.getItem('jenny-mascotte-size')===null){" +
@@ -887,6 +968,11 @@ class JennyOverlayController(private val context: Context) {
             val on = if (autoPark) "1" else "0"
             js += "if(localStorage.getItem('jenny-mascotte-autopark')===null){" +
                 "localStorage.setItem('jenny-mascotte-autopark','$on');}"
+        }
+        if (smartHide != null) {
+            val on = if (smartHide) "1" else "0"
+            js += "if(localStorage.getItem('jenny-mascotte-smarthide')===null){" +
+                "localStorage.setItem('jenny-mascotte-smarthide','$on');}"
         }
         js += "return false;}catch(e){return false;}})()"
         view.evaluateJavascript(js) { raw ->
@@ -1028,6 +1114,21 @@ class JennyOverlayController(private val context: Context) {
 
     // Ultimo saluto "app in primo piano" (batch 4), per il rate-limit.
     private var lastCheerAtMs = 0L
+
+    // ---- Batch 6: umore corrente (-2..+2, costanti MOOD_* in alto) ----
+    // Aggiornato SOLO da eventi gia noti (raiseMood/lowerMood/recomputeMood).
+    private var mood = MOOD_NEUTRAL
+    private var lastMoodEventMs = 0L
+    private var lastMoodPush = -99
+
+    // Timer periodico condiviso di batch 6 (umore/deriva + smart hide).
+    private var batch6TickRunnable: Runnable? = null
+    private var batch6TickCount = 0
+
+    // Smart hide: mediaActive = c'e audio in riproduzione; smartHidden = si
+    // e ritirata da sola (WebView GONE + finestra non toccabile).
+    private var smartHideMediaActive = false
+    private var smartHidden = false
 
     @SuppressLint("ClickableViewAccessibility")
     private fun onPetTouch(event: MotionEvent): Boolean {
@@ -1274,6 +1375,7 @@ class JennyOverlayController(private val context: Context) {
     }
 
     private fun launchFlight(vx: Float, vy: Float) {
+        if (abs(vx) + abs(vy) >= FLING_MIN_PX_S) raiseMood(MOOD_EXCITED)
         phase = Phase.FLY
         velX = vx
         velY = vy
@@ -1602,6 +1704,7 @@ class JennyOverlayController(private val context: Context) {
             // Pagina che dorme (anche sonno esplicito "Dormi"): niente saluto.
             if (raw != null && raw.trim() == "true") return@evaluateJavascript
             lastCheerAtMs = System.currentTimeMillis()
+            raiseMood(MOOD_HAPPY)
             val pose = POKE_POSES[(Math.random() * POKE_POSES.size).toInt()]
             applyPose(pose)
             settleRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -1680,9 +1783,22 @@ class JennyOverlayController(private val context: Context) {
     /** Tap singolo: breve reazione "viva" (pose ART già esistenti nella
      *  pagina, mai inventate), poi ritorno a idle. Il ritorno condivide il
      *  timer "settle": un nuovo tocco o un drag lo cancellano. */
+    /** Preferenza "smart hide" applicata dalle Impostazioni (batch 6):
+     *  persistita in overlay/smartHide e rispecchiata in localStorage
+     *  (chiave jenny-mascotte-smarthide, stesso schema di haptics/autoPark).
+     *  Nessun effetto geometrico immediato; se la mascotte e in una ritirata
+     *  automatica e l'opzione viene spenta, torna subito visibile. */
+    private fun chooseSmartHide(on: Boolean) {
+        overlayPrefs().edit().putBoolean(PREFS_SMART_HIDE, on).apply()
+        val mirror = if (on) "1" else "0"
+        evalJs("try{localStorage.setItem('jenny-mascotte-smarthide', '$mirror');}catch(e){}")
+        if (!on) restoreFromSmartHide()
+    }
+
     private fun poke() {
         if (petView == null || phase != Phase.IDLE) return
         if (touchActive || dragCommitted) return
+        raiseMood(MOOD_HAPPY)
         vibrate(VIBRATE_POKE_MS)
         val pose = POKE_POSES[(Math.random() * POKE_POSES.size).toInt()]
         applyPose(pose)
@@ -1892,6 +2008,182 @@ class JennyOverlayController(private val context: Context) {
         evalJs("window.__jennyRefreshArt && window.__jennyRefreshArt();")
     }
 
+    // ------------------------------------------------------------- umore
+
+    /** Solleva l'umore dopo un evento di rinforzo (gesto, interazione,
+     *  carica): il momento dell'evento viene ricordato e la deriva
+     *  MOOD_DECAY_MS riportera da sola l'umore a NEUTRAL. */
+    private fun raiseMood(level: Int) {
+        if (level <= mood) return
+        mood = level
+        lastMoodEventMs = System.currentTimeMillis()
+        maybePushMood()
+    }
+
+    /** Abbassa l'umore per una condizione ambientale persistente (batteria
+     *  bassa, risparmio energetico). Un rinforzo recente (interazione piu
+     *  giovane di MOOD_DECAY_MS) ha la precedenza: un poke durante la carica
+     *  bassa resta comunque un attimo di felicita. */
+    private fun lowerMood(level: Int) {
+        val now = System.currentTimeMillis()
+        if (lastMoodEventMs != 0L && now - lastMoodEventMs < MOOD_DECAY_MS) return
+        if (mood > level) {
+            mood = level
+            maybePushMood()
+        }
+    }
+
+    /** Ricalcola l'umore: applica la deriva verso NEUTRAL e, solo quando non
+     *  c'e un rinforzo recente, le condizioni ambientali persistenti (notte
+     *  fonda + mascotte lasciata in pace → assonnata). Chiamato dal timer
+     *  periodico di batch 6 e dai punti di transizione (batteria, curiosita). */
+    private fun recomputeMood() {
+        val now = System.currentTimeMillis()
+        var m = mood
+        if (lastMoodEventMs != 0L && now - lastMoodEventMs >= MOOD_DECAY_MS) {
+            m = MOOD_NEUTRAL
+            lastMoodEventMs = 0L
+        }
+        val reinforced = lastMoodEventMs != 0L && now - lastMoodEventMs < MOOD_DECAY_MS
+        if (!reinforced) {
+            // Condizioni ambientali persistenti (nessun rinforzo recente):
+            // batteria bassa/risparmio → stanca; notte fonda lasciata in pace
+            // → assonnata (comunque la pagina da sola dorme già); la carica
+            // invece è un rinforzo continuo e tiene l'umore su HAPPY finché
+            // il cavo è collegato (ma non vince sulla notte).
+            if (lowBattery || powerSaveMode) m = min(m, MOOD_TIRED)
+            val hour = localHour(now)
+            val night = hour >= MOOD_LATE_NIGHT_START || hour < MOOD_LATE_NIGHT_END
+            val nightIdle = night && lastInteractionMs != 0L &&
+                now - lastInteractionMs >= MOOD_LONG_IDLE_MS
+            if (nightIdle) m = min(m, MOOD_SLEEPY)
+            if (charging && !nightIdle && !screenOff && m < MOOD_HAPPY) {
+                m = MOOD_HAPPY
+                lastMoodEventMs = now
+            }
+        }
+        if (m != mood) {
+            mood = m
+            maybePushMood()
+        }
+    }
+
+    /** Ora locale 0-23 (per la fascia notturna); 12 se il Calendar fallisce. */
+    private fun localHour(now: Long): Int =
+        try {
+            java.util.Calendar.getInstance().apply { timeInMillis = now }
+                .get(java.util.Calendar.HOUR_OF_DAY)
+        } catch (_: Exception) {
+            12
+        }
+
+    /** Invia l'umore alla pagina (window.__jennySetMood) solo se cambiato
+     *  dall'ultimo invio; la pagina lo usa per orientare pose e ritmi che
+     *  esistono gia. Niente a schermo spento: verra rimandato allo screen on
+     *  o al prossimo cambio. */
+    private fun maybePushMood() {
+        if (mood == lastMoodPush) return
+        if (petView == null || screenOff) return
+        lastMoodPush = mood
+        evalJs("window.__jennySetMood && window.__jennySetMood($mood);")
+    }
+
+    /** Timer periodico di batch 6: ricalcolo umore/deriva a ogni tick, poll
+     *  smart hide ogni SMART_HIDE_POLL_STEPS tick. Costo trascurabile; si
+     *  riprogramma da solo finche l'overlay e vivo (teardown lo rimuove). */
+    private fun scheduleBatch6Tick() {
+        if (batch6TickRunnable != null) return
+        val run = Runnable {
+            batch6TickRunnable = null
+            if (petView == null) return@Runnable
+            recomputeMood()
+            maybePushMood()
+            batch6TickCount++
+            if (batch6TickCount % SMART_HIDE_POLL_STEPS == 0) smartHidePoll()
+            scheduleBatch6Tick()
+        }
+        batch6TickRunnable = run
+        mainHandler.postDelayed(run, BATCH6_TICK_MS)
+    }
+
+    // -------------------------------------------------- smart hide (batch 6)
+
+    /** Poll dello smart hide (chiamato dal timer periodico). Vedi la nota nel
+     *  companion: l'audio attivo e l'unico segnale osservabile SENZA nuovi
+     *  permessi per "un'app/video a schermo intero e davanti". Ritirata solo
+     *  da riposo e se l'utente non sta giocando con la mascotte; mai quando
+     *  l'app host e in primo piano (musica in sottofondo mentre si usa Jenny)
+     *  e mai a batteria scarsa / risparmio energetico. */
+    private fun smartHidePoll() {
+        if (!smartHidePref() || overlayHostForeground) return
+        if (petView == null || petParams == null || screenOff) return
+        if (energySaveActive()) return
+        val audio = runCatching {
+            context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        }.getOrNull() ?: return
+        val mediaOn = audio.isMusicActive
+        if (mediaOn && !smartHideMediaActive) {
+            smartHideMediaActive = true
+            Log.i(TAG, "smart hide: media attivo — mascotte in ritiro")
+        } else if (!mediaOn && smartHideMediaActive) {
+            smartHideMediaActive = false
+            Log.i(TAG, "smart hide: media finito — mascotte di nuovo visibile")
+            restoreFromSmartHide()
+            return
+        }
+        if (smartHideMediaActive && !smartHidden && phase == Phase.IDLE &&
+            !dragCommitted && !touchActive && !menuOpen &&
+            glideRunnable == null && settleRunnable == null
+        ) {
+            val quiet = System.currentTimeMillis() - lastInteractionMs
+            if (lastInteractionMs != 0L && quiet < SMART_HIDE_QUIET_MS) return
+            applySmartHide()
+        }
+    }
+
+    /** Ritirata automatica: la WebView diventa invisibile e la finestra lascia
+     *  passare i tocchi (FLAG_NOT_TOUCHABLE). Niente teardown ne preferenza
+     *  "hidden" persistente: quando l'audio smette (o l'app host torna in
+     *  primo piano) la mascotte riappare senza ricaricare nulla. */
+    private fun applySmartHide() {
+        val view = petView ?: return
+        val lp = petParams ?: return
+        stopGlide()
+        settleRunnable?.let { mainHandler.removeCallbacks(it) }
+        settleRunnable = null
+        cancelPendingPoke()
+        smartHidden = true
+        view.visibility = View.GONE
+        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        runCatching { wm.updateViewLayout(view, lp) }
+    }
+
+    /** Annulla una ritirata automatica (audio finito, opzione spenta o app
+     *  host di nuovo in primo piano). */
+    private fun restoreFromSmartHide() {
+        if (!smartHidden) return
+        smartHidden = false
+        val view = petView ?: return
+        val lp = petParams ?: return
+        view.visibility = View.VISIBLE
+        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        runCatching { wm.updateViewLayout(view, lp) }
+        if (phase == Phase.IDLE) {
+            startSit()
+            scheduleCuriosity()
+        }
+    }
+
+    /** L'app host e passata in primo piano / in background. In primo piano la
+     *  mascotte non si ritira (l'utente sta usando Jenny, magari con la
+     *  musica in sottofondo) e un'eventuale ritirata automatica si annulla.
+     *  Il valore vive nel companion: onResume puo correre prima che il
+     *  controller esista (il service crea l'overlay dopo). */
+    fun setHostForeground(foreground: Boolean) {
+        overlayHostForeground = foreground
+        if (foreground && petView != null) restoreFromSmartHide()
+    }
+
     // ------------------------------------------------------------- curiosità
 
     /** Pianifica il prossimo controllo dei micro-movimenti autonomi. Chiamata
@@ -1920,6 +2212,10 @@ class JennyOverlayController(private val context: Context) {
             return
         }
         if (energySaveActive()) { scheduleCuriosity(); return }
+        // Batch 6 — una mascotte stanca/assonnata non fa giretti autonomi
+        // (lo specchia la pagina: pose e ritmi piu quieti).
+        recomputeMood()
+        if (mood < MOOD_NEUTRAL) { scheduleCuriosity(); return }
         // Mai a ridosso di un'interazione dell'utente: requisito minimo di
         // quiete (CURIOUS_MIN_MS) prima di un movimento autonomo.
         val quiet = System.currentTimeMillis() - lastInteractionMs
@@ -2051,6 +2347,7 @@ class JennyOverlayController(private val context: Context) {
      *  parcheggio lo fa solo applyWindow quando parkedSide != 0. */
     private fun throwToEdge(side: Int) {
         if (petView == null || petParams == null) return
+        raiseMood(MOOD_EXCITED)
         showHideTarget(false)
         // Il drag è finito: la mascotte torna a riposo e la corsa al bordo è
         // un movimento volontario da IDLE (come un riposo lento, ma deciso).

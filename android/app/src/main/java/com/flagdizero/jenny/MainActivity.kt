@@ -657,6 +657,11 @@ class MainActivity : AppCompatActivity() {
         // Stop WebView JS/animation processing while backgrounded; the
         // gateway keeps running independently in GatewayService.
         webView?.onPause()
+        // Batch 6: l'app host non è più in primo piano — la mascotte può
+        // riprendere le ritirate smart (un'app/video a schermo intero è
+        // davanti). Il flag vive nel controller ed è condiviso anche con
+        // i controller nati dopo questo onPause/onResume.
+        JennyOverlayController.live?.setHostForeground(false)
     }
 
     override fun onResume() {
@@ -701,6 +706,11 @@ class MainActivity : AppCompatActivity() {
                 // appropriato: a riposo, pagina sveglia e non più di una volta
                 // ogni CHEER_MIN_INTERVAL_MS.
                 JennyOverlayController.live?.cheerUp()
+                // Batch 6: in primo piano la mascotte non fa ritirate
+                // smart (l'utente sta usando Jenny, magari con la musica
+                // in sottofondo) e un'eventuale ritirata automatica si
+                // annulla subito.
+                JennyOverlayController.live?.setHostForeground(true)
             }
         }
     }
@@ -1256,6 +1266,27 @@ class MainActivity : AppCompatActivity() {
                 .edit().putBoolean("overlay/autoPark", on).apply()
             runOnUiThread {
                 JennyOverlayController.live?.applyExternalVisuals(autoPark = on)
+            }
+            return on
+        }
+
+        // ── Mascotte overlay: smart hide (batch 6) ──
+        // Ritiro automatico quando un'app/video a schermo intero è davanti:
+        // senza permessi di sistema l'overlay osserva l'audio attivo
+        // (AudioManager.isMusicActive). Default attivo.
+
+        @JavascriptInterface
+        fun overlayMascotSmartHide(): Boolean {
+            val prefs = getSharedPreferences("overlay", MODE_PRIVATE)
+            return prefs.getBoolean("overlay/smartHide", true)
+        }
+
+        @JavascriptInterface
+        fun setOverlayMascotSmartHide(on: Boolean): Boolean {
+            getSharedPreferences("overlay", MODE_PRIVATE)
+                .edit().putBoolean("overlay/smartHide", on).apply()
+            runOnUiThread {
+                JennyOverlayController.live?.applyExternalVisuals(smartHide = on)
             }
             return on
         }
