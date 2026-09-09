@@ -236,7 +236,7 @@ class JennyOverlayController(private val context: Context) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> onScreenOff()
                 Intent.ACTION_SCREEN_ON -> onScreenOn()
-                Intent.ACTION_POWER_SAVE_MODE_CHANGED -> refreshPowerState()
+                PowerManager.ACTION_POWER_SAVE_MODE_CHANGED -> refreshPowerState()
                 else -> {}
             }
         }
@@ -475,7 +475,7 @@ class JennyOverlayController(private val context: Context) {
      *  resta in vigore il percorso storico a risorse/metriche. */
     private fun onWindowInsets(insets: WindowInsets) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        val bars = insets.systemBars
+        val bars = insets.getInsets(WindowInsets.Type.systemBars())
         val cutout = insets.displayCutout
         val l = max(bars.left, cutout?.safeInsetLeft ?: 0)
         val t = max(bars.top, cutout?.safeInsetTop ?: 0)
@@ -560,7 +560,7 @@ class JennyOverlayController(private val context: Context) {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_POWER_SAVE_MODE_CHANGED)
+            addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
         }
         runCatching { context.registerReceiver(powerStateReceiver, filter) }
             .onSuccess { screenReceiverRegistered = true }
@@ -1735,8 +1735,8 @@ class JennyOverlayController(private val context: Context) {
      *  Ripristina la posa di riposo e, se era in corso uno "sguardo" da
      *  parcheggiata, riporta la finestra esattamente in peek. */
     private fun stopGlide() {
-        if (glideRunnable == null) return
-        mainHandler.removeCallbacks(glideRunnable)
+        val r = glideRunnable ?: return
+        mainHandler.removeCallbacks(r)
         glideRunnable = null
         glideToken++
         if (petView != null && phase == Phase.IDLE) {
