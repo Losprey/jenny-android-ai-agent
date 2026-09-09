@@ -546,6 +546,48 @@
   /* Bolla esposta al controller Kotlin (chiamata sicura in seguito). */
   window.__jennyBubble = showBubble;
 
+  /* ---- Comandi espliciti del menu rapido nativo (sonno/veglia, refresh) ----
+     Il controller non deve inventare pose per "dormire": il sonno è uno stato
+     interno (classe .sleepy + Zzz) raggiunto dopo ~30s di idle. Queste API
+     espongono lo stesso stato ai comandi del menu (Dormi) e al gating dei
+     micro-movimenti. ---- */
+  function sleepNow() {
+    if (!prefs.sleep || sleeping) return;
+    clearSleepTimer();
+    if (activePose !== 'idle') {
+      // Porta a idle come posa nativa (aggiorna stato logico e timer), poi
+      // dorme subito. Il setPose può aver riprogrammato il timer del sonno.
+      setPose('idle', leftSide, false);
+      clearSleepTimer();
+    }
+    if (activePose !== 'idle') return; // setPose non riuscita: resta com'è
+    stopIdleLife(true);
+    sleeping = true;
+    art.classList.add('sleepy');
+    showZzz();
+    clearAmbientTimer();
+    hideBubble();
+  }
+  function wakeNow() {
+    if (!sleeping) return;
+    doWake();
+    if (activePose === 'idle') {
+      idleSinceMs = Date.now(); // i ~30s di idle ripartono da adesso
+      clearSleepTimer();
+      scheduleSleep();
+    }
+  }
+  window.__jennySleep = sleepNow;
+  window.__jennyWake = wakeNow;
+  window.__jennySleeping = function () { return sleeping; };
+
+  /* Cambio preferenze visive (es. colore dal menu): ricarica la posa corrente
+     senza toccare lo stato logico né il sonno (life-style, come la vita idle).
+     Se l'URL non cambia (colore identico) il setPose è già un no-op. */
+  window.__jennyRefreshArt = function () {
+    if (activePose !== null) setPose(activePose, leftSide, true);
+  };
+
   /* ---- 5) Frasi ambientali opzionali (brevissime, lingua del file) ---- */
   var AMBIENT_LINES = {
     night:   ['Buona notte!', 'Notte, notte.'],

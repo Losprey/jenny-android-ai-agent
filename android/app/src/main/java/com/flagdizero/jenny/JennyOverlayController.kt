@@ -28,6 +28,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.max
@@ -44,13 +45,19 @@ import org.json.JSONObject
  *
  * Fisica (stile "Volo Pegman" della SPA, ma con il pavimento = bordo basso del
  * display invece del dock):
- *  - drag: la finestra segue il dito (posa `hang`, nessun long-press/menu);
+ *  - drag: la finestra segue il dito (posa `hang`); il drag parte con un
+ *    movimento oltre lo slop (niente "hold-to-grab": il long-press è il menu);
  *  - rilascio con velocità: volo con gravità, attrito sull'asse x, rimbalzi su
  *    pareti/soffitto e 1-3 piccoli rimbalzi sul pavimento prima di fermarsi;
  *  - rilascio "debole": caduta verticale e appoggio sul pavimento nel punto di
  *    rilascio;
  *  - appoggio: posa `ground` per un istante, poi `idle` col bob della chat;
- *  - tap corto (senza spostamento): apre MainActivity;
+ *  - tap breve senza spostamento = "poke" (reazione: hello1/hello2/think);
+ *  - doppio tap = apre MainActivity (o voce "Apri la chat" del menu);
+ *  - long-press (dito fermo) = menu rapido: dimensione (sm/md/lg), colore,
+ *    dormi (sonno esplicito della pagina), nascondi, apri la chat;
+ *  - curiosità: ogni tanto un micro-movimento autonomo gentile, solo a riposo
+ *    e mai in risparmio energetico (qualsiasi tocco lo annulla);
  *  - durante il drag appare in alto al centro un bersaglio "✕": rilasciando la
  *    mascotte sopra si NASCONDE l'overlay (scelta persistente).
  */
@@ -69,9 +76,30 @@ class JennyOverlayController(private val context: Context) {
         private const val HIDE_HIT_EXTRA_DP = 18
 
         private const val TAP_SLOP_DP = 8
-        private const val HOLD_COMMIT_MS = 280L
-        private const val TAP_TIMEOUT_MS = 340L
+        // Gesti: tocco fermo per LONG_PRESS_MS = menu rapido; un tap senza
+        // spostamento è "poke" se non arriva un secondo tap entro
+        // DOUBLE_TAP_TIMEOUT_MS (che invece apre MainActivity).
+        private const val LONG_PRESS_MS = 420L
+        private const val DOUBLE_TAP_TIMEOUT_MS = 300L
         private const val SIT_GROUND_MS = 650L
+        private const val POKE_RETURN_MS = 1400L
+        /** Pose di reazione del tap (chiavi ART esistenti nella pagina). */
+        private val POKE_POSES = arrayOf("hello1", "hello2", "think")
+
+        // Menu rapido nativo (long-press sulla mascotte).
+        private const val MENU_WIDTH_DP = 182
+        private const val MENU_ROW_HEIGHT_DP = 40
+        private const val MENU_PAD_DP = 6
+        private const val MENU_GAP_DP = 8
+        private const val MENU_AUTO_DISMISS_MS = 6000L
+        private const val MENU_CORNER_RADIUS_DP = 18
+
+        // Micro-movimenti autonomi (curiosità): rari, lenti, solo a riposo.
+        private const val CURIOUS_MIN_MS = 60_000L
+        private const val CURIOUS_MAX_MS = 150_000L
+        private const val CURIOUS_GLIDE_STEP_MS = 90L
+        private const val CURIOUS_WANDER_MIN_DP = 46
+        private const val CURIOUS_WANDER_MAX_DP = 120
 
         // Edge peek-hide (park mostly off-screen, art-aware: resta sempre
         // visibile >= 1/3 della sprite disegnata e uno sliver minimo toccabile).
@@ -99,6 +127,12 @@ class JennyOverlayController(private val context: Context) {
         private const val PREFS_POS_X = "overlay/posX"
         private const val PREFS_POS_Y = "overlay/posY"
         private const val PREFS_PARKED_SIDE = "overlay/parkedSide"
+        // Scelte del menu rapido: mirror delle localStorage della pagina
+        // (ripristino se lo storage della WebView viene cancellato).
+        // Dimensione: "sm"|"md"|"lg" (chiave assente = default della pagina);
+        // colore: true = sprite -color.
+        private const val PREFS_SIZE = "overlay/size"
+        private const val PREFS_COLOR = "overlay/color"
         // Hook per una futura UI di impostazioni (oggi nessuna UI: default).
         private const val PREFS_AUTO_PARK = "overlay/autoPark"
         private const val PREFS_PEEK_MIN_SLIVER_DP = "overlay/peekMinSliverDp"
@@ -256,6 +290,19 @@ class JennyOverlayController(private val context: Context) {
         val v = overlayPrefs().getInt(PREFS_PEEK_MIN_SLIVER_DP, PEEK_MIN_SLIVER_DP_DEFAULT)
         return if (v in 8..200) v else PEEK_MIN_SLIVER_DP_DEFAULT
     }
+
+    /** Dimensione scelta dal menu rapido (overlay/size, assente = default). */
+    private fun readSizePref(): String? {
+        val v = overlayPrefs().getString(PREFS_SIZE, null) ?: return null
+        return if (SIZE_DP_BY_PREF.containsKey(v)) v else null
+    }
+
+    /** Preferenza colore (overlay/color; default true = sprite -color). */
+    private fun colorPref(): Boolean = overlayPrefs().getBoolean(PREFS_COLOR, true)
+
+    /** Stessa preferenza, ma "assente" distinguibile dal default. */
+    private fun readColorPref(): Boolean? =
+        if (overlayPrefs().contains(PREFS_COLOR)) colorPref() else null
 
     /** Salva posizione e parcheggio correnti (niente dati sensibili). Chiamato
      *  a riposo (settle), a fine drag, a fine parcheggio e prima dello stop. */
@@ -531,11 +578,23 @@ class JennyOverlayController(private val context: Context) {
 
     private fun teardown() {
         persistState()
+        dismissMenu()
         phase = Phase.NONE
         lastFrameNs = 0L
         mainHandler.removeCallbacksAndMessages(null)
         artPollRunnable = null
         settleRunnable = null
+        curiousRunnable = null
+        glideRunnable = null
+        pendingTapRunnable = null
+        longPressRunnable = null
+        menuAutoDismiss = null
+        touchActive = false
+        menuCloseTouch = false
+        longPressFired = false
+        secondTapCandidate = false
+        lastTapUpMs = 0L
+        glideToken = 0
         unregisterScreenStateReceiver()
         unregisterDisplayListener()
         removeTarget()
@@ -565,7 +624,9 @@ class JennyOverlayController(private val context: Context) {
     private fun showPet() {
         phase = Phase.IDLE
         parkedSide = 0 // si riparte sempre non parcheggiato
-        sizePx = dp(DEFAULT_SIZE_DP)
+        // Dimensione iniziale: preferenza del menu rapido se presente (stessa
+        // scala sm/md/lg della SPA); il poll la riallinea alla pagina.
+        sizePx = dp(SIZE_DP_BY_PREF[readSizePref() ?: "sm"] ?: DEFAULT_SIZE_DP)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -622,6 +683,7 @@ class JennyOverlayController(private val context: Context) {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     pageAttempts = 0
+                    seedPagePrefs()
                     pollArtAndPrefs()
                 }
             }
@@ -645,6 +707,7 @@ class JennyOverlayController(private val context: Context) {
         refreshPowerState()
         applyWindow()
         loadPage()
+        scheduleCuriosity()
     }
 
     private fun loadPage() {
@@ -678,6 +741,34 @@ class JennyOverlayController(private val context: Context) {
             "window.__jennySetPose && " +
                 "window.__jennySetPose('$name', ${if (facingLeft) "true" else "false"});"
         )
+    }
+
+    /** Se la localStorage della pagina è stata cancellata, riallinea
+     *  dimensione e colore con le preferenze del menu rapido (overlay/size,
+     *  overlay/color). Se il colore effettivo della pagina cambia chiede il
+     *  refresh dell'art (life-style: non sveglia se la pagina dorme). */
+    private fun seedPagePrefs() {
+        val view = petView ?: return
+        val size = readSizePref()
+        val color = readColorPref()
+        if (size == null && color == null) return
+        var js = "(function(){try{"
+        if (size != null) {
+            js += "if(localStorage.getItem('jenny-mascotte-size')===null){" +
+                "localStorage.setItem('jenny-mascotte-size','$size');}"
+        }
+        if (color != null) {
+            val on = if (color) "1" else "0"
+            js += "var b=localStorage.getItem('jenny-mascotte-color');" +
+                "if(b===null){localStorage.setItem('jenny-mascotte-color','$on');" +
+                "return ('1'!=='$on');}"
+        }
+        js += "return false;}catch(e){return false;}})()"
+        view.evaluateJavascript(js) { raw ->
+            if (raw == "true") {
+                evalJs("window.__jennyRefreshArt && window.__jennyRefreshArt();")
+            }
+        }
     }
 
     /** Legge la posizione del riquadro disegnato (piedi/artFeetFrac, testa/
@@ -783,11 +874,28 @@ class JennyOverlayController(private val context: Context) {
     private var grabDx = 0f
     private var grabDy = 0f
     private var dragCommitted = false
-    private var downTimeMs = 0L
     private var lastMoveRawX = 0f
     private var lastMoveRawY = 0f
     private var velocityTracker: VelocityTracker? = null
-    private var commitRunnable: Runnable? = null
+
+    // Stato del gesto corrente e del menu rapido (long-press).
+    private var touchActive = false
+    private var menuCloseTouch = false
+    private var longPressRunnable: Runnable? = null
+    private var longPressFired = false
+    private var pendingTapRunnable: Runnable? = null
+    private var secondTapCandidate = false
+    private var lastTapUpMs = 0L
+    private var menuOpen = false
+    private var menuView: View? = null
+    private var menuAutoDismiss: Runnable? = null
+    private var menuRequestToken = 0
+
+    // Curiosità: micro-movimenti autonomi a riposo (sezione dedicata).
+    private var curiousRunnable: Runnable? = null
+    private var glideRunnable: Runnable? = null
+    private var glideToken = 0
+    private var lastInteractionMs = 0L
 
     @SuppressLint("ClickableViewAccessibility")
     private fun onPetTouch(event: MotionEvent): Boolean {
@@ -796,6 +904,27 @@ class JennyOverlayController(private val context: Context) {
         val lp = petParams ?: return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Qualsiasi tocco annulla i micro-movimenti di curiosità in
+                // corso e chiude un eventuale menu rapido aperto.
+                touchActive = true
+                lastInteractionMs = System.currentTimeMillis()
+                stopGlide()
+                if (menuOpen) {
+                    // Il tocco serviva solo a chiudere il menu: non deve
+                    // contare come tap/poke sulla mascotte.
+                    dismissMenu()
+                    menuCloseTouch = true
+                } else {
+                    menuCloseTouch = false
+                }
+                if (pendingTapRunnable != null) {
+                    // Un tap precedente attendeva nella finestra del doppio
+                    // tap: questo tocco può completare il doppio tap.
+                    cancelPendingPoke()
+                    secondTapCandidate = true
+                } else {
+                    secondTapCandidate = false
+                }
                 downRawX = event.rawX
                 downRawY = event.rawY
                 downLpX = lp.x
@@ -803,17 +932,15 @@ class JennyOverlayController(private val context: Context) {
                 grabDx = 0f
                 grabDy = 0f
                 dragCommitted = false
-                downTimeMs = System.currentTimeMillis()
                 lastMoveRawX = downRawX
                 lastMoveRawY = downRawY
                 velocityTracker = VelocityTracker.obtain().apply {
                     addMovement(event)
                 }
-                val commitRun = Runnable {
-                    commitDrag(lp)
-                }
-                commitRunnable = commitRun
-                mainHandler.postDelayed(commitRun, HOLD_COMMIT_MS)
+                // Long-press: se il dito resta fermo si apre il menu rapido.
+                val longRun = Runnable { onLongPressFired() }
+                longPressRunnable = longRun
+                mainHandler.postDelayed(longRun, LONG_PRESS_MS)
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -851,30 +978,46 @@ class JennyOverlayController(private val context: Context) {
                 val vx = velocityTracker?.xVelocity ?: 0f
                 val vy = velocityTracker?.yVelocity ?: 0f
                 releaseTracker()
-                commitRunnable?.let { mainHandler.removeCallbacks(it) }
-                commitRunnable = null
+                touchActive = false
+                lastInteractionMs = System.currentTimeMillis()
+                longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                longPressRunnable = null
+                // Ogni interazione riavvia l'orologio dei micro-movimenti.
+                scheduleCuriosity()
 
                 if (!dragCommitted) {
-                    val duration = System.currentTimeMillis() - downTimeMs
                     val moved = abs(event.rawX - downRawX) > dp(TAP_SLOP_DP) ||
                         abs(event.rawY - downRawY) > dp(TAP_SLOP_DP)
-                    if (duration < TAP_TIMEOUT_MS && !moved) {
-                        if (parkedSide != 0) {
-                            // Tap sullo sliver di un pet parcheggiato: non apre
-                            // MainActivity, riporta la finestra al bordo visibile.
-                            unParkToEdge()
-                            return true
-                        }
-                        // Tap: apre l'app. Nessun long-press, nessun menu.
-                        context.startActivity(
-                            Intent(context, MainActivity::class.java).apply {
-                                addFlags(
-                                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                )
-                            }
-                        )
+                    if (longPressFired) {
+                        // Rilascio dopo un long-press: chiude solo il menu.
+                        longPressFired = false
+                        secondTapCandidate = false
+                        lastTapUpMs = 0L
+                        dismissMenu()
+                        return true
                     }
+                    if (moved) {
+                        // Micro-spostamento sotto lo slop: nessun gesto.
+                        secondTapCandidate = false
+                        lastTapUpMs = 0L
+                        return true
+                    }
+                    if (menuCloseTouch) {
+                        // Il tocco serviva solo a chiudere il menu.
+                        menuCloseTouch = false
+                        secondTapCandidate = false
+                        lastTapUpMs = 0L
+                        return true
+                    }
+                    if (parkedSide != 0) {
+                        // Tap sullo sliver di un pet parcheggiato: non apre
+                        // l'app e non fa "poke": riporta al bordo visibile.
+                        secondTapCandidate = false
+                        lastTapUpMs = 0L
+                        unParkToEdge()
+                        return true
+                    }
+                    handleTapUp()
                     return true
                 }
 
@@ -907,8 +1050,20 @@ class JennyOverlayController(private val context: Context) {
 
             MotionEvent.ACTION_CANCEL -> {
                 releaseTracker()
-                commitRunnable?.let { mainHandler.removeCallbacks(it) }
-                commitRunnable = null
+                touchActive = false
+                lastInteractionMs = System.currentTimeMillis()
+                stopGlide()
+                longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                longPressRunnable = null
+                cancelPendingPoke()
+                secondTapCandidate = false
+                lastTapUpMs = 0L
+                menuCloseTouch = false
+                if (longPressFired) {
+                    longPressFired = false
+                    dismissMenu()
+                }
+                scheduleCuriosity()
                 if (dragCommitted) {
                     if (parkedSide != 0) {
                         // Drag interrotto di un pet parcheggiato: torna in peek.
@@ -942,8 +1097,14 @@ class JennyOverlayController(private val context: Context) {
     private fun commitDrag(lp: WindowManager.LayoutParams) {
         if (dragCommitted) return
         dragCommitted = true
-        commitRunnable?.let { mainHandler.removeCallbacks(it) }
-        commitRunnable = null
+        // Un drag non è un tap né un doppio tap: menu e "poke" in attesa via.
+        dismissMenu()
+        cancelPendingPoke()
+        longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+        longPressRunnable = null
+        longPressFired = false
+        secondTapCandidate = false
+        lastTapUpMs = 0L
         // Punto di presa = punto del tocco dentro la finestra.
         grabDx = downRawX - downLpX
         grabDy = downRawY - downLpY
@@ -1173,6 +1334,392 @@ class JennyOverlayController(private val context: Context) {
             parkToSide(parkedSide)
             persistState()
             startSit()
+        }
+    }
+
+    // ------------------------------------------------------------- gesti (tap)
+
+    /** Un tap valido (breve, senza spostamento): se arriva entro la finestra
+     *  dal tap precedente è un doppio tap e apre l'app; altrimenti si accoda
+     *  un "poke" (reazione) che scatta solo se non arriva un secondo tocco. */
+    private fun handleTapUp() {
+        val now = System.currentTimeMillis()
+        if (secondTapCandidate && lastTapUpMs != 0L) {
+            secondTapCandidate = false
+            lastTapUpMs = 0L
+            openMainApp()
+            return
+        }
+        secondTapCandidate = false
+        lastTapUpMs = now
+        cancelPendingPoke()
+        val run = Runnable {
+            pendingTapRunnable = null
+            lastTapUpMs = 0L
+            poke()
+        }
+        pendingTapRunnable = run
+        mainHandler.postDelayed(run, DOUBLE_TAP_TIMEOUT_MS)
+    }
+
+    private fun cancelPendingPoke() {
+        pendingTapRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingTapRunnable = null
+    }
+
+    /** Tap singolo: breve reazione "viva" (pose ART già esistenti nella
+     *  pagina, mai inventate), poi ritorno a idle. Il ritorno condivide il
+     *  timer "settle": un nuovo tocco o un drag lo cancellano. */
+    private fun poke() {
+        if (petView == null || phase != Phase.IDLE) return
+        if (touchActive || dragCommitted) return
+        val pose = POKE_POSES[(Math.random() * POKE_POSES.size).toInt()]
+        applyPose(pose)
+        settleRunnable?.let { mainHandler.removeCallbacks(it) }
+        settleRunnable = null
+        val returnRun = Runnable {
+            settleRunnable = null
+            if (petView != null && phase == Phase.IDLE) applyPose("idle")
+        }
+        settleRunnable = returnRun
+        mainHandler.postDelayed(returnRun, POKE_RETURN_MS)
+    }
+
+    /** Apre MainActivity (stesso avvio del vecchio tap singolo di batch-1).
+     *  Chi possiede SYSTEM_ALERT_WINDOW può partire anche da background. */
+    private fun openMainApp() {
+        runCatching {
+            context.startActivity(
+                Intent(context, MainActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    )
+                }
+            )
+        }
+    }
+
+    /** Long-press (dito fermo LONG_PRESS_MS): apre il menu rapido. */
+    private fun onLongPressFired() {
+        longPressRunnable = null
+        if (petView == null || petParams == null) return
+        if (dragCommitted || phase != Phase.IDLE) return
+        if (longPressFired) return
+        // Il long-press non è un tap: al rilascio non deve fare poke.
+        longPressFired = true
+        cancelPendingPoke()
+        secondTapCandidate = false
+        lastTapUpMs = 0L
+        stopGlide()
+        openMenu()
+    }
+
+    // ------------------------------------------------------------- menu rapido
+
+    /** Menu del long-press: dimensioni, colore, dormi, nascondi, apri chat.
+     *  Finestra nativa sopra la mascotte (come il bersaglio ✕), non DOM della
+     *  pagina: i tocchi restano gestiti dal controller e la pagina resta un
+     *  palcoscenico senza logica di UI. */
+    private fun openMenu() {
+        val view = petView ?: return
+        val token = ++menuRequestToken
+        // Evidenzia dimensione/colore VERI leggendoli dalla pagina (stessa
+        // localStorage della SPA), non da una copia locale potenzialmente
+        // vecchia.
+        view.evaluateJavascript(
+            "(window.__jennyPrefs?JSON.stringify(window.__jennyPrefs()):'null')"
+        ) { raw ->
+            if (petView == null || petParams == null || menuRequestToken != token) {
+                return@evaluateJavascript
+            }
+            var size = "sm"
+            var color = true
+            runCatching {
+                if (!raw.isNullOrBlank() && raw != "null") {
+                    val obj = JSONObject(raw)
+                    size = obj.optString("size", "sm")
+                    color = obj.optBoolean("color", true)
+                }
+            }
+            if (!SIZE_DP_BY_PREF.containsKey(size)) size = "sm"
+            buildMenuWindow(size, color)
+        }
+    }
+
+    private fun buildMenuWindow(curSize: String, curColor: Boolean) {
+        val lp = petParams ?: return
+        dismissMenu()
+        val pad = dp(MENU_PAD_DP)
+        val rowH = dp(MENU_ROW_HEIGHT_DP)
+        val menuW = dp(MENU_WIDTH_DP)
+
+        val rows = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            background = GradientDrawable().apply {
+                cornerRadius = dp(MENU_CORNER_RADIUS_DP).toFloat()
+                setColor(Color.argb(242, 17, 24, 39))
+                setStroke(dp(1), Color.argb(120, 255, 255, 255))
+            }
+        }
+
+        fun addRow(label: String, checked: Boolean?, action: () -> Unit) {
+            val prefix = if (checked == true) "\u2713  " else "    "
+            val tv = TextView(context).apply {
+                text = prefix + label
+                setTextColor(if (checked == true) Color.rgb(126, 231, 135) else Color.WHITE)
+                textSize = 15f
+                gravity = Gravity.CENTER_VERTICAL
+                isClickable = true
+                setPadding(dp(10), 0, dp(6), 0)
+                setOnClickListener {
+                    // Rimozione rimandata: non distruggere la finestra mentre
+                    // sta distribuendo il tocco che ha generato il click.
+                    mainHandler.post { dismissMenu() }
+                    runCatching { action() }
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    rowH
+                )
+            }
+            rows.addView(tv)
+        }
+
+        addRow("Piccola", curSize == "sm") { chooseSize("sm") }
+        addRow("Media", curSize == "md") { chooseSize("md") }
+        addRow("Grande", curSize == "lg") { chooseSize("lg") }
+        addRow("Colore", curColor) { chooseColor(!curColor) }
+        addRow("Dormi", null) {
+            evalJs("window.__jennySleep && window.__jennySleep();")
+        }
+        addRow("Nascondi", null) { hide() }
+        addRow("Apri la chat", null) { openMainApp() }
+
+        val rowCount = 7
+        val menuH = rowCount * rowH + pad * 2
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        val menuLp = WindowManager.LayoutParams(
+            menuW,
+            menuH,
+            type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            // Sopra la mascotte, centrato sulla finestra; se non c'è spazio
+            // sotto. Sempre dentro lo schermo.
+            var mx = lp.x + (sizePx - menuW) / 2
+            mx = mx.coerceAtLeast(dp(MENU_PAD_DP))
+                .coerceAtMost(max(dp(MENU_PAD_DP), screenW - menuW - dp(MENU_PAD_DP)))
+            var my = lp.y - menuH - dp(MENU_GAP_DP)
+            if (my < usableTop + dp(MENU_GAP_DP)) {
+                my = lp.y + sizePx + dp(MENU_GAP_DP)
+            }
+            my = my.coerceAtLeast(dp(MENU_PAD_DP))
+                .coerceAtMost(max(dp(MENU_PAD_DP), screenH - menuH - dp(MENU_PAD_DP)))
+            x = mx
+            y = my
+        }
+        runCatching { wm.addView(rows, menuLp) }
+            .onSuccess {
+                menuView = rows
+                menuOpen = true
+                rows.setOnTouchListener { _, ev ->
+                    // Tocco fuori dal menu (FLAG_WATCH_OUTSIDE_TOUCH): si chiude.
+                    if (ev.actionMasked == MotionEvent.ACTION_OUTSIDE) dismissMenu()
+                    false
+                }
+                val auto = Runnable { dismissMenu() }
+                menuAutoDismiss = auto
+                mainHandler.postDelayed(auto, MENU_AUTO_DISMISS_MS)
+            }
+            .onFailure { Log.w(TAG, "menu addView failed", it) }
+    }
+
+    private fun dismissMenu() {
+        menuOpen = false
+        menuAutoDismiss?.let { mainHandler.removeCallbacks(it) }
+        menuAutoDismiss = null
+        menuView?.let { runCatching { wm.removeView(it) } }
+        menuView = null
+    }
+
+    /** Voce "dimensione": persistita in overlay/size e nella localStorage
+     *  della pagina (stessa chiave della SPA letta dal poll di batch-1).
+     *  resizeTo riclampa nella zona utile, rimette sul pavimento, riapplica il
+     *  peek se parcheggiata e aggiorna la finestra. */
+    private fun chooseSize(pref: String) {
+        overlayPrefs().edit().putString(PREFS_SIZE, pref).apply()
+        evalJs("try{localStorage.setItem('jenny-mascotte-size', '$pref');}catch(e){}")
+        val newPx = dp(SIZE_DP_BY_PREF[pref] ?: DEFAULT_SIZE_DP)
+        resizeTo(newPx)
+        persistState()
+    }
+
+    /** Voce "colore": toggle delle sprite -color; persistito in overlay/color
+     *  e nella localStorage della pagina. La posa corrente viene ricaricata
+     *  (life-style: se sta dormendo non si sveglia). */
+    private fun chooseColor(on: Boolean) {
+        overlayPrefs().edit().putBoolean(PREFS_COLOR, on).apply()
+        evalJs(
+            "try{localStorage.setItem('jenny-mascotte-color', '" +
+                (if (on) "1" else "0") + "');}catch(e){}"
+        )
+        evalJs("window.__jennyRefreshArt && window.__jennyRefreshArt();")
+    }
+
+    // ------------------------------------------------------------- curiosità
+
+    /** Pianifica il prossimo controllo dei micro-movimenti autonomi. Chiamata
+     *  a ogni interazione e a fine movimento; mai più di un timer attivo. */
+    private fun scheduleCuriosity() {
+        if (petView == null) return
+        if (curiousRunnable != null) return
+        val span = (CURIOUS_MAX_MS - CURIOUS_MIN_MS).toDouble()
+        val delay = CURIOUS_MIN_MS + (Math.random() * span).toLong()
+        val run = Runnable {
+            curiousRunnable = null
+            maybeCuriousMove()
+        }
+        curiousRunnable = run
+        mainHandler.postDelayed(run, delay)
+    }
+
+    /** Decide se fare un micro-movimento adesso. Requisiti: a riposo (idle,
+     *  nessuna transizione di posa in corso), nessun dito sullo schermo,
+     *  niente risparmio energetico, pagina non addormentata. */
+    private fun maybeCuriousMove() {
+        val view = petView ?: return
+        if (petParams == null) { scheduleCuriosity(); return }
+        if (phase != Phase.IDLE || settleRunnable != null || dragCommitted || touchActive) {
+            scheduleCuriosity()
+            return
+        }
+        if (energySaveActive()) { scheduleCuriosity(); return }
+        // Mai a ridosso di un'interazione dell'utente: requisito minimo di
+        // quiete (CURIOUS_MIN_MS) prima di un movimento autonomo.
+        val quiet = System.currentTimeMillis() - lastInteractionMs
+        if (quiet < CURIOUS_MIN_MS) { scheduleCuriosity(); return }
+        view.evaluateJavascript(
+            "(window.__jennySleeping?window.__jennySleeping():false)"
+        ) { raw ->
+            if (petView != null && petParams != null && raw == "false") {
+                startCuriousMove()
+            }
+            scheduleCuriosity()
+        }
+    }
+
+    /** Avvia il micro-movimento: se parcheggiata un piccolo "sguardo" fuori e
+     *  subito indietro (resta in peek, art-safe); altrimenti una breve
+     *  camminata sul pavimento dentro i limiti utili, che non finisce mai
+     *  parcheggiata (con autoPark=false nessun moto che si conclude in park). */
+    private fun startCuriousMove() {
+        if (petView == null || petParams == null || phase != Phase.IDLE) return
+        if (settleRunnable != null || dragCommitted || touchActive || energySaveActive()) return
+        val path = ArrayList<Float>()
+        var walk = false
+        if (parkedSide != 0) {
+            if (!autoParkPref()) return // parcheggio disabilitato: non succede
+            val edgeX = if (parkedSide < 0) minDockX().toFloat() else maxDockX().toFloat()
+            val mid = (posX + edgeX) / 2f
+            if (abs(mid - posX) < dp(4)) return
+            addGlideSteps(path, posX, mid)
+            addGlideSteps(path, mid, posX)
+        } else {
+            val lo = (minDockX() + dp(4)).toFloat()
+            val hi = (maxDockX() - dp(4)).toFloat()
+            if (hi <= lo) return
+            val spanDp = CURIOUS_WANDER_MAX_DP - CURIOUS_WANDER_MIN_DP
+            val dist = dp(CURIOUS_WANDER_MIN_DP + (Math.random() * spanDp).toInt())
+            val dir = if (Math.random() < 0.5f) -1f else 1f
+            var target = (posX + dir * dist).coerceIn(lo, hi)
+            if (abs(target - posX) < dp(12)) {
+                target = (posX - dir * dist).coerceIn(lo, hi)
+            }
+            if (abs(target - posX) < dp(12)) return
+            walk = true
+            facingLeft = target < posX
+            addGlideSteps(path, posX, target)
+        }
+        if (path.isEmpty()) return
+        launchGlide(path, walk)
+    }
+
+    private fun addGlideSteps(out: MutableList<Float>, from: Float, to: Float) {
+        val steps = 6
+        for (i in 1..steps) out.add(from + (to - from) * i / steps)
+    }
+
+    /** Muove la finestra lungo il percorso x con passi piccoli e frequenti.
+     *  Ogni passo verifica che l'utente non abbia ripreso il controllo e che
+     *  il risparmio energetico non sia attivo: al primo "no" si ferma. */
+    private fun launchGlide(path: List<Float>, walk: Boolean) {
+        val token = ++glideToken
+        var index = 0
+        val step = object : Runnable {
+            override fun run() {
+                if (petView == null || glideToken != token) return
+                if (phase != Phase.IDLE || touchActive || energySaveActive()) {
+                    finishGlide(token)
+                    return
+                }
+                if (walk) applyPose(if (index % 2 == 0) "walk1" else "walk2")
+                posX = path[index]
+                applyWindow()
+                index++
+                if (index < path.size) {
+                    mainHandler.postDelayed(this, CURIOUS_GLIDE_STEP_MS)
+                } else {
+                    finishGlide(token)
+                }
+            }
+        }
+        glideRunnable = step
+        mainHandler.postDelayed(step, CURIOUS_GLIDE_STEP_MS)
+    }
+
+    private fun finishGlide(token: Int) {
+        if (glideToken != token) return
+        glideRunnable?.let { mainHandler.removeCallbacks(it) }
+        glideRunnable = null
+        if (petView == null) return
+        if (phase != Phase.IDLE) { scheduleCuriosity(); return }
+        if (parkedSide != 0) {
+            // Anche un'interruzione a metà "sguardo" riporta in peek.
+            parkToSide(parkedSide)
+        } else {
+            applyPose("idle")
+            posY = floorTopY()
+        }
+        applyWindow()
+        persistState()
+        scheduleCuriosity()
+    }
+
+    /** Ferma subito un micro-movimento (un tocco ha preso il controllo).
+     *  Ripristina la posa di riposo e, se era in corso uno "sguardo" da
+     *  parcheggiata, riporta la finestra esattamente in peek. */
+    private fun stopGlide() {
+        if (glideRunnable == null) return
+        mainHandler.removeCallbacks(glideRunnable)
+        glideRunnable = null
+        glideToken++
+        if (petView != null && phase == Phase.IDLE) {
+            if (parkedSide != 0) {
+                parkToSide(parkedSide)
+            } else {
+                applyPose("idle")
+            }
         }
     }
 
