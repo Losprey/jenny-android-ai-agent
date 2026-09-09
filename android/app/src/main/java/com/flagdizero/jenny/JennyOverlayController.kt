@@ -1,14 +1,19 @@
 package com.flagdizero.jenny
 
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -17,6 +22,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.View
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -70,7 +76,11 @@ class JennyOverlayController(private val context: Context) {
         // Edge peek-hide (park mostly off-screen, art-aware: resta sempre
         // visibile >= 1/3 della sprite disegnata e uno sliver minimo toccabile).
         private const val PARK_BAND_DP = 36
-        private const val PEEK_MIN_SLIVER_DP = 44
+        private const val PEEK_MIN_SLIVER_DP_DEFAULT = 44
+
+        // Soglia batteria sotto cui il controller riduce il lavoro non
+        // essenziale (pose/spostamenti puramente decorativi).
+        private const val LOW_BATTERY_PERCENT = 15
 
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
@@ -84,6 +94,14 @@ class JennyOverlayController(private val context: Context) {
 
         private const val PREFS_NAME = "overlay"
         private const val PREFS_HIDDEN = "hidden"
+        // Posizione e parcheggio persistiti (stesso file "overlay" di
+        // MainActivity: "hidden"/"asked"; qui chiavi con prefisso overlay/...).
+        private const val PREFS_POS_X = "overlay/posX"
+        private const val PREFS_POS_Y = "overlay/posY"
+        private const val PREFS_PARKED_SIDE = "overlay/parkedSide"
+        // Hook per una futura UI di impostazioni (oggi nessuna UI: default).
+        private const val PREFS_AUTO_PARK = "overlay/autoPark"
+        private const val PREFS_PEEK_MIN_SLIVER_DP = "overlay/peekMinSliverDp"
 
         private const val GATEWAY_HOST = "127.0.0.1"
         private const val GATEWAY_PORT = 18790
@@ -109,11 +127,27 @@ class JennyOverlayController(private val context: Context) {
     // 0 = non parcheggiato (finestra del tutto dentro lo schermo).
     private var parkedSide = 0
 
-    // Geometria (px reali del display).
+    // Geometria (px reali del display) e limiti "utili": dentro barre di
+    // sistema/gesture e display cutout. Finché gli insets non sono noti i
+    // limiti utili coincidono con tutto lo schermo e il pavimento usa il
+    // vecchio calcolo via risorse/metriche (comportamento storico).
     private var screenW = 0
     private var screenH = 0
+    private var usableLeft = 0
+    private var usableTop = 0
+    private var usableRight = 0
+    private var usableBottom = 0
     private var floorLineY = 0          // y del display su cui poggiano i piedi
     private var sizePx = 0
+
+    // Insets di sistema/gesture + display cutout, catturati dal WebView una
+    // volta agganciato (solo R+). insetsKnown=false finché il listener non li
+    // consegna: finché sono ignoti si resta sul percorso storico.
+    private var insetsLeft = 0
+    private var insetsTop = 0
+    private var insetsRight = 0
+    private var insetsBottom = 0
+    private var insetsKnown = false
 
     // Frazioni del riquadro disegnato rispetto alla finestra quadrata.
     private var artTopFrac = 0f         // 0 finché non misurato
@@ -134,6 +168,39 @@ class JennyOverlayController(private val context: Context) {
     private var artPollRunnable: Runnable? = null
     private var settleRunnable: Runnable? = null
     private var lastSentPose: Pair<String, Boolean>? = null
+
+    // Stato schermo/batteria: a schermo spento o in risparmio energetico il
+    // controller ferma solo il lavoro non essenziale (il drag e il parcheggio
+    // restano sempre attivi).
+    private var screenOff = false
+    private var powerSaveMode = false
+    private var lowBattery = false
+
+    private var screenReceiverRegistered = false
+    private var displayListenerRegistered = false
+
+    /** Notifica rotazione/cambio display (la Activity può rinascere, ma il
+     *  GatewayService — e questo controller — sopravvivono). */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == defaultDisplayId()) onGeometryChanged()
+        }
+    }
+
+    /** Schermo spento/acceso + cambi del risparmio energetico. */
+    private val powerStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> onScreenOff()
+                Intent.ACTION_SCREEN_ON -> onScreenOn()
+                Intent.ACTION_POWER_SAVE_MODE_CHANGED -> refreshPowerState()
+                else -> {}
+            }
+        }
+    }
+
     private val frameCallback = Choreographer.FrameCallback { frameTime ->
         if (phase == Phase.FLY) stepPhysics(frameTime)
     }
@@ -152,7 +219,7 @@ class JennyOverlayController(private val context: Context) {
             return
         }
         if (petView != null) return
-        readDisplay()
+        refreshGeometry()
         showPet()
     }
 
@@ -181,10 +248,55 @@ class JennyOverlayController(private val context: Context) {
         overlayPrefs().edit().putBoolean(PREFS_HIDDEN, hidden).apply()
     }
 
+    /** Preferenza futura "parcheggio automatico" (default true, nessuna UI). */
+    private fun autoParkPref(): Boolean = overlayPrefs().getBoolean(PREFS_AUTO_PARK, true)
+
+    /** Sliver minimo di peek in dp (default 44, futura UI impostazioni). */
+    private fun peekMinSliverDp(): Int {
+        val v = overlayPrefs().getInt(PREFS_PEEK_MIN_SLIVER_DP, PEEK_MIN_SLIVER_DP_DEFAULT)
+        return if (v in 8..200) v else PEEK_MIN_SLIVER_DP_DEFAULT
+    }
+
+    /** Salva posizione e parcheggio correnti (niente dati sensibili). Chiamato
+     *  a riposo (settle), a fine drag, a fine parcheggio e prima dello stop. */
+    private fun persistState() {
+        if (petView == null) return
+        overlayPrefs().edit()
+            .putFloat(PREFS_POS_X, posX)
+            .putFloat(PREFS_POS_Y, posY)
+            .putInt(PREFS_PARKED_SIDE, parkedSide)
+            .apply()
+    }
+
+    /** Ripristina posizione/parcheggio salvati (se esistono). Ogni valore viene
+     *  riclampato nei limiti utili CORRENTI e rimesso sul pavimento: valori
+     *  stantii (schermo cambiato, rotazione) non possono mai finire fuori
+     *  schermo o sotto la barra di stato. Con autoPark=false il parcheggio
+     *  salvato viene ignorato (resta il clamp al bordo visibile). */
+    private fun restoreSavedPosition() {
+        val prefs = overlayPrefs()
+        val hasX = prefs.contains(PREFS_POS_X)
+        val hasY = prefs.contains(PREFS_POS_Y)
+        val hasSide = prefs.contains(PREFS_PARKED_SIDE)
+        if (!hasX && !hasY && !hasSide) return
+        if (autoParkPref() && hasSide) {
+            val side = prefs.getInt(PREFS_PARKED_SIDE, 0)
+            if (side == -1 || side == 1) {
+                // Percorso di parcheggio art-safe (peekOffsetPx), come a riposo.
+                parkToSide(side)
+                return
+            }
+        }
+        posY = floorTopY()
+        if (hasX) posX = prefs.getFloat(PREFS_POS_X, posX)
+        posX = posX.coerceIn(minDockX().toFloat(), maxDockX().toFloat())
+        applyWindow()
+    }
+
     // -------------------------------------------------------------- display
 
-    private fun readDisplay() {
-        val (w, h) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    private fun displaySizePx(): Pair<Int, Int> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val b = wm.maximumWindowMetrics.bounds
             b.width() to b.height()
         } else {
@@ -194,12 +306,121 @@ class JennyOverlayController(private val context: Context) {
             wm.defaultDisplay.getRealMetrics(dm)
             dm.widthPixels to dm.heightPixels
         }
+    }
+
+    /** Limite sinistro della zona "utile" (in pratica 0; può crescere solo con
+     *  un display cutout a sinistra). */
+    private fun minDockX(): Int = usableLeft
+
+    /** Limite destro dell'area di ancoraggio (dock) della finestra del tutto
+     *  dentro lo schermo: dentro la zona utile (usableRight - sizePx). */
+    private fun maxDockX(): Int = (usableRight - sizePx).coerceAtLeast(usableLeft)
+
+    /** Ricalcola la geometria (schermo + limiti utili + pavimento).
+     *  Con gli insets noti (R+, consegnati dal WebView) il pavimento e i bordi
+     *  utili escludono barre di sistema/gesture e notch; senza insets si
+     *  ripiega sul vecchio calcolo via risorse/metriche. Ritorna true se
+     *  qualcosa è cambiato rispetto ai valori correnti. */
+    private fun refreshGeometry(): Boolean {
+        val (w, h) = displaySizePx()
+        val sizeChanged = screenW != w || screenH != h
         screenW = w
         screenH = h
-        val navBarPx = systemNavBarHeightPx()
-        // Il pavimento sta sopra barra di navigazione/gesture, con un margine.
-        val bottomGap = if (navBarPx > 0) navBarPx + dp(FLOOR_GAP_DP) else dp(FLOOR_GAP_DP + 16)
-        floorLineY = h - bottomGap
+
+        var newLeft = 0
+        var newTop = 0
+        var newRight = w
+        var newBottom = h
+        var newFloor = floorLineY
+        if (insetsKnown) {
+            // Zona utile: dentro barre di sistema/gesture e display cutout.
+            newLeft = insetsLeft.coerceIn(0, w)
+            newTop = insetsTop.coerceIn(0, h)
+            newRight = (w - insetsRight).coerceIn(newLeft, w)
+            // Se la barra bassa non arriva come inset (finestra overlay che non
+            // riceve insets) si ripiega sull'altezza storica della risorsa.
+            val bottomInset = if (insetsBottom > 0) insetsBottom else systemNavBarHeightPx()
+            newBottom = (h - bottomInset).coerceIn(newTop, h)
+            // Pavimento: sopra la barra bassa con il solito piccolo margine; se
+            // nessuna barra bassa è nota si usa il margine storico più ampio.
+            newFloor = if (bottomInset > 0) {
+                (newBottom - dp(FLOOR_GAP_DP)).coerceAtLeast(0)
+            } else {
+                (h - dp(FLOOR_GAP_DP + 16)).coerceAtLeast(0)
+            }
+        } else {
+            // Fallback storico (pre-R o insets non ancora consegnati).
+            val navBarPx = systemNavBarHeightPx()
+            // Il pavimento sta sopra barra di navigazione/gesture, con un margine.
+            val bottomGap = if (navBarPx > 0) navBarPx + dp(FLOOR_GAP_DP) else dp(FLOOR_GAP_DP + 16)
+            newFloor = h - bottomGap
+        }
+
+        val changed = sizeChanged ||
+            newLeft != usableLeft || newTop != usableTop ||
+            newRight != usableRight || newBottom != usableBottom ||
+            newFloor != floorLineY
+        if (changed) {
+            usableLeft = newLeft
+            usableTop = newTop
+            usableRight = newRight
+            usableBottom = newBottom
+            floorLineY = newFloor
+        }
+        return changed
+    }
+
+    /** Chiamata quando cambiano insets (listener del WebView) o display
+     *  (DisplayListener, rotazione): ricalcola la geometria utile e
+     *  riposiziona la mascotte nei nuovi limiti, senza perdere stato né
+     *  persistenza. */
+    private fun onGeometryChanged() {
+        if (!refreshGeometry()) return
+        Log.i(
+            TAG,
+            "geometry: ${screenW}x${screenH} usable=" +
+                "[$usableLeft,$usableTop,$usableRight,$usableBottom] floor=$floorLineY"
+        )
+        if (petView != null && phase == Phase.IDLE) reapplyToUsableBounds()
+        // In volo/drag i nuovi muri e limiti valgono dal prossimo applyWindow.
+    }
+
+    /** Riclampa la mascotte nei limiti utili appena ricalcolati (rotazione,
+     *  cambio insets): piedi sul pavimento, dentro i bordi orizzontali e, se
+     *  parcheggiata, peek riapplicato con l'offset art-safe corrente. */
+    private fun reapplyToUsableBounds() {
+        if (petView == null || petParams == null) return
+        posY = floorTopY()
+        if (parkedSide != 0) {
+            parkToSide(parkedSide)
+        } else {
+            posX = posX.coerceIn(minDockX().toFloat(), maxDockX().toFloat())
+            applyWindow()
+        }
+        persistState()
+    }
+
+    /** Salva gli insets consegnati dal WebView e ricalcola la geometria utile.
+     *  Solo su R+: systemBars/displayCutout richiedono API 30/28 e prima di R
+     *  resta in vigore il percorso storico a risorse/metriche. */
+    private fun onWindowInsets(insets: WindowInsets) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val bars = insets.systemBars
+        val cutout = insets.displayCutout
+        val l = max(bars.left, cutout?.safeInsetLeft ?: 0)
+        val t = max(bars.top, cutout?.safeInsetTop ?: 0)
+        val r = max(bars.right, cutout?.safeInsetRight ?: 0)
+        val b = max(bars.bottom, cutout?.safeInsetBottom ?: 0)
+        val changed = !insetsKnown ||
+            l != insetsLeft || t != insetsTop || r != insetsRight || b != insetsBottom
+        if (!changed) return
+        insetsLeft = l
+        insetsTop = t
+        insetsRight = r
+        insetsBottom = b
+        insetsKnown = true
+        Log.i(TAG, "window insets: l=$l t=$t r=$r b=$b")
+        onGeometryChanged()
     }
 
     private fun systemNavBarHeightPx(): Int {
@@ -213,14 +434,110 @@ class JennyOverlayController(private val context: Context) {
         } else 0
     }
 
+    @Suppress("DEPRECATION")
+    private fun defaultDisplayId(): Int = wm.defaultDisplay.displayId
+
+    private fun registerDisplayListener() {
+        if (displayListenerRegistered) return
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: return
+        runCatching { dm.registerDisplayListener(displayListener, mainHandler) }
+            .onSuccess { displayListenerRegistered = true }
+            .onFailure { Log.w(TAG, "registerDisplayListener failed", it) }
+    }
+
+    private fun unregisterDisplayListener() {
+        if (!displayListenerRegistered) return
+        displayListenerRegistered = false
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: return
+        runCatching { dm.unregisterDisplayListener(displayListener) }
+    }
+
+    // ---------------------------------------------------------- power/schermo
+
+    /** Vero quando conviene ridurre il lavoro non essenziale: schermo spento,
+     *  risparmio energetico o batteria sotto soglia. Non tocca MAI il drag e
+     *  non tocca il parcheggio (spec: "keep park"). */
+    private fun energySaveActive(): Boolean = screenOff || powerSaveMode || lowBattery
+
+    /** Rilegge risparmio energetico + livello batteria e applica il gating. */
+    private fun refreshPowerState() {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        screenOff = !pm.isInteractive
+        powerSaveMode = pm.isPowerSaveMode
+        lowBattery = batteryPercentNow() <= LOW_BATTERY_PERCENT
+        Log.i(
+            TAG,
+            "power: screenOff=$screenOff powerSave=$powerSaveMode lowBattery=$lowBattery"
+        )
+        // Se il risparmio finisce mentre l'art non era ancora misurata, riparte
+        // il polling (l'unica attività periodica del controller a riposo).
+        if (!energySaveActive() && artFeetFrac >= 1f && petView != null) pollArtAndPrefs()
+    }
+
+    /** Livello batteria corrente dalla sticky broadcast, o 100 se illeggibile. */
+    private fun batteryPercentNow(): Int {
+        val sticky = runCatching {
+            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }.getOrNull() ?: return 100
+        val level = sticky.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = sticky.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+        if (level < 0 || scale <= 0) return 100
+        return (level * 100 / scale).coerceIn(0, 100)
+    }
+
+    private fun registerScreenStateReceiver() {
+        if (screenReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_POWER_SAVE_MODE_CHANGED)
+        }
+        runCatching { context.registerReceiver(powerStateReceiver, filter) }
+            .onSuccess { screenReceiverRegistered = true }
+            .onFailure { Log.w(TAG, "registerReceiver(power) failed", it) }
+    }
+
+    private fun unregisterScreenStateReceiver() {
+        if (!screenReceiverRegistered) return
+        screenReceiverRegistered = false
+        runCatching { context.unregisterReceiver(powerStateReceiver) }
+    }
+
+    /** Schermo spento. Niente posa "sleep" inventata: la pagina non ha una
+     *  posa dedicata (ART = idle/hang/fall/ground + pose extra; il "sonno" è
+     *  interno alla pagina, dopo ~30s di idle). Si ferma solo la fisica in
+     *  corso e si salva lo stato. */
+    private fun onScreenOff() {
+        screenOff = true
+        Log.i(TAG, "screen off")
+        if (phase == Phase.FLY) {
+            settleFlight() // ferma il Choreographer; riposiziona e salva
+        } else if (petView != null && phase == Phase.IDLE) {
+            persistState()
+        }
+    }
+
+    /** Schermo di nuovo acceso: si rilegge lo stato energetico (che riprende
+     *  da solo il polling dell'art se non era ancora misurata e il risparmio
+     *  è finito). Nessuna posa da "svegliare": non ne abbiamo mai mandata una
+     *  di sonno. */
+    private fun onScreenOn() {
+        screenOff = false
+        Log.i(TAG, "screen on")
+        refreshPowerState()
+    }
+
     // ------------------------------------------------------------- teardown
 
     private fun teardown() {
+        persistState()
         phase = Phase.NONE
         lastFrameNs = 0L
         mainHandler.removeCallbacksAndMessages(null)
         artPollRunnable = null
         settleRunnable = null
+        unregisterScreenStateReceiver()
+        unregisterDisplayListener()
         removeTarget()
         petView?.let { v ->
             runCatching { wm.removeView(v) }
@@ -230,6 +547,9 @@ class JennyOverlayController(private val context: Context) {
         petParams = null
         pageAttempts = 0
         artPollCount = 0
+        screenOff = false
+        powerSaveMode = false
+        lowBattery = false
     }
 
     private fun removeTarget() {
@@ -278,6 +598,12 @@ class JennyOverlayController(private val context: Context) {
             settings.mediaPlaybackRequiresUserGesture = false
             setOnLongClickListener { true }
             setOnTouchListener { _, event -> onPetTouch(event) }
+            // Cattura barre di sistema/gesture e notch una volta agganciato
+            // (R+): da lì si ricalcola la geometria "utile" della finestra.
+            setOnApplyWindowInsetsListener { _, insets ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) onWindowInsets(insets)
+                insets
+            }
             webViewClient = object : WebViewClient() {
                 override fun onReceivedError(
                     view: WebView?,
@@ -301,8 +627,10 @@ class JennyOverlayController(private val context: Context) {
             }
         }
 
-        // Appoggio iniziale: in basso al centro, piedi sul pavimento.
-        posX = ((screenW - sizePx) / 2).toFloat()
+        // Appoggio iniziale: in basso al centro (dei limiti utili), piedi sul
+        // pavimento. Se esistono valori salvati vengono ripristinati dopo
+        // l'addView (restoreSavedPosition riclampa nei limiti correnti).
+        posX = (minDockX() + maxDockX()) / 2f
         posY = floorTopY()
         lp.x = posX.roundToInt()
         lp.y = posY.roundToInt()
@@ -311,6 +639,10 @@ class JennyOverlayController(private val context: Context) {
         petView = web
         petParams = lp
         pageAttempts = 0
+        restoreSavedPosition()
+        registerDisplayListener()
+        registerScreenStateReceiver()
+        refreshPowerState()
         applyWindow()
         loadPage()
     }
@@ -407,7 +739,7 @@ class JennyOverlayController(private val context: Context) {
                     parkToSide(parkedSide)
                 }
             }
-            if (artFeetFrac >= 1f && artPollCount < ART_POLL_MAX) {
+            if (artFeetFrac >= 1f && artPollCount < ART_POLL_MAX && !energySaveActive()) {
                 artPollCount++
                 val pollRunnable = Runnable { pollArtAndPrefs() }
                 artPollRunnable = pollRunnable
@@ -432,7 +764,7 @@ class JennyOverlayController(private val context: Context) {
                 // (nuovo offset di peek, piedi sul pavimento).
                 parkToSide(parkedSide)
             } else {
-                posX = (posX * ratio).coerceIn(0f, (screenW - sizePx).toFloat())
+                posX = (posX * ratio).coerceIn(minDockX().toFloat(), maxDockX().toFloat())
                 posY = floorTopY()
             }
         } else {
@@ -582,6 +914,14 @@ class JennyOverlayController(private val context: Context) {
                         // Drag interrotto di un pet parcheggiato: torna in peek.
                         showHideTarget(false)
                         parkToSide(parkedSide)
+                        persistState()
+                        startSit()
+                    } else if (screenOff) {
+                        // Schermo spento a metà drag (ACTION_CANCEL): niente
+                        // volo inutile, la mascotte si appoggia dov'è.
+                        phase = Phase.IDLE
+                        posY = floorTopY()
+                        maybeParkAfterSettle()
                         startSit()
                     } else {
                         launchFlight(0f, 0f)
@@ -646,22 +986,22 @@ class JennyOverlayController(private val context: Context) {
         posX += velX * dt
         posY += velY * dt
 
-        // Pareti laterali.
-        if (posX < 0f) {
-            posX = 0f
+        // Pareti laterali (dentro la zona utile).
+        if (posX < minDockX()) {
+            posX = minDockX().toFloat()
             if (velX < 0f) velX = -velX * WALL_RESTITUTION
             if (abs(velX) < dp(2)) velX = 0f
         }
-        val maxX = (screenW - sizePx).coerceAtLeast(0)
+        val maxX = maxDockX()
         if (posX > maxX) {
             posX = maxX.toFloat()
             if (velX > 0f) velX = -velX * WALL_RESTITUTION
             if (abs(velX) < dp(2)) velX = 0f
         }
 
-        // Soffitto.
-        if (posY < 0f) {
-            posY = 0f
+        // Soffitto: mai sopra la zona utile (orologio/notch).
+        if (posY < usableTop) {
+            posY = usableTop.toFloat()
             if (velY < 0f) velY = -velY * CEILING_RESTITUTION
         }
 
@@ -733,9 +1073,10 @@ class JennyOverlayController(private val context: Context) {
      *     perché resti esattamente artW/3;
      *   - a destra (posX = maxX + offset, a schermo resta la striscia sinistra)
      *     serve offset <= S*(3 - 2aL - aR)/3.
-     *  Il risultato è limitato a S - PEEK_MIN_SLIVER_DP: lo sliver a schermo
-     *  resta comunque un bersaglio toccabile. Con art ignota (fallback 0..1) il
-     *  limite è S*2/3: un terzo della finestra resta visibile (sicuro). */
+     *  Il risultato è limitato a S - sliver minimo (peekMinSliverDp): lo
+     *  sliver a schermo resta comunque un bersaglio toccabile. Con art ignota
+     *  (fallback 0..1) il limite è S*2/3: un terzo della finestra resta
+     *  visibile (sicuro). */
     private fun peekOffsetPx(side: Int): Int {
         val s = sizePx
         var aL = if (artLeftFrac in 0f..1f) artLeftFrac else 0f
@@ -746,7 +1087,7 @@ class JennyOverlayController(private val context: Context) {
         } else {
             s * (3f - 2f * aL - aR) / 3f
         }
-        val sliverCap = (s - dp(PEEK_MIN_SLIVER_DP)).toFloat()
+        val sliverCap = (s - dp(peekMinSliverDp())).toFloat()
         return max(0, min(artBound, sliverCap).roundToInt())
     }
 
@@ -754,36 +1095,47 @@ class JennyOverlayController(private val context: Context) {
      *  sinistra, side > 0 → destra): posX = -offset o posX = maxX + offset con
      *  offset = peekOffsetPx(side) (limite art-safe). y resta sul pavimento. */
     private fun parkToSide(side: Int) {
-        val maxX = max(0, screenW - sizePx)
+        val minX = minDockX()
+        val maxX = maxDockX()
         val offset = peekOffsetPx(side)
         parkedSide = if (side < 0) -1 else 1
-        posX = if (side < 0) -offset.toFloat() else (maxX + offset).toFloat()
+        posX = if (side < 0) (minX - offset).toFloat() else (maxX + offset).toFloat()
         posY = floorTopY()
         applyWindow()
     }
 
-    /** Da parcheggiato: tap sullo sliver → si rientra sul bordo (x = 0 o
-     *  maxX), finestra completamente visibile, stato normale. */
+    /** Da parcheggiato: tap sullo sliver → si rientra sul bordo visibile della
+     *  zona utile (x = minX o maxX), finestra completamente visibile, stato
+     *  normale. */
     private fun unParkToEdge() {
         val side = parkedSide
-        val maxX = max(0, screenW - sizePx)
+        val maxX = maxDockX()
         parkedSide = 0
-        posX = if (side < 0) 0f else maxX.toFloat()
+        posX = if (side < 0) minDockX().toFloat() else maxX.toFloat()
         posY = floorTopY()
         applyWindow()
+        persistState()
     }
 
     /** Da chiamare SOLO a riposo (settleFlight o rilascio debole sul pavimento),
      *  mai in volo. Se la finestra si è fermata nella fascia di bordo
      *  (PARK_BAND_DP) viene parcheggiata in peek su quel lato (quasi del tutto
      *  fuori schermo, ma con >= 1/3 del riquadro disegnato ancora visibile e uno
-     *  sliver minimo toccabile); altrimenti resta dov'è, del tutto dentro lo
-     *  schermo (x in [0, maxX]). */
+     *  sliver minimo toccabile); altrimenti resta dov'è, del tutto dentro la
+     *  zona utile (x in [minX, maxX]). */
     private fun maybeParkAfterSettle() {
-        val maxX = max(0, screenW - sizePx)
+        if (!autoParkPref()) {
+            // autoPark=false: mai parcheggiare; si resta al clamp di bordo.
+            parkedSide = 0
+            posX = posX.coerceIn(minDockX().toFloat(), maxDockX().toFloat())
+            applyWindow()
+            persistState()
+            return
+        }
+        val maxX = maxDockX()
         val band = dp(PARK_BAND_DP)
         val side = when {
-            posX <= band -> -1
+            posX <= minDockX() + band -> -1
             posX >= maxX - band -> 1
             else -> 0
         }
@@ -791,19 +1143,22 @@ class JennyOverlayController(private val context: Context) {
             parkToSide(side)
         } else {
             parkedSide = 0
-            posX = posX.coerceIn(0f, maxX.toFloat())
+            posX = posX.coerceIn(minDockX().toFloat(), maxDockX().toFloat())
             applyWindow()
         }
+        persistState()
     }
 
     /** Rilascio di un drag partito da parcheggiato: il volo è soppresso. Se la
-     *  mascotte è stata sfilata del tutto (x in [0, maxX]) esce dal parcheggio e
-     *  vale il rilascio debole normale (re-park se finisce di nuovo in fascia di
-     *  bordo); se è ancora in parte fuori schermo torna nella posizione di peek. */
+     *  mascotte è stata sfilata del tutto (x in [minX, maxX]) esce dal
+     *  parcheggio e vale il rilascio debole normale (re-park se finisce di
+     *  nuovo in fascia di bordo); se è ancora in parte fuori schermo torna
+     *  nella posizione di peek. */
     private fun releaseParkedDrag() {
         showHideTarget(false)
-        val maxX = max(0, screenW - sizePx)
-        if (posX >= 0f && posX <= maxX.toFloat()) {
+        val minX = minDockX()
+        val maxX = maxDockX()
+        if (posX >= minX && posX <= maxX.toFloat()) {
             parkedSide = 0
             val feetY = posY + artFeetFrac * sizePx
             if (feetY >= floorLineY - dp(2)) {
@@ -816,6 +1171,7 @@ class JennyOverlayController(private val context: Context) {
             }
         } else {
             parkToSide(parkedSide)
+            persistState()
             startSit()
         }
     }
@@ -884,18 +1240,21 @@ class JennyOverlayController(private val context: Context) {
 
     private fun applyWindow() {
         val lp = petParams ?: return
-        val maxX = max(0, screenW - sizePx)
-        // Invariante: la finestra resta del tutto dentro lo schermo in
+        val minX = minDockX()
+        val maxX = maxDockX()
+        // Invariante: la finestra resta del tutto dentro la zona utile in
         // orizzontale, per ogni movimento (drag, volo, riposo) — tranne quando
         // è parcheggiata su un bordo: in quel caso può uscire SOLO fino al
         // limite art-safe di peekOffsetPx (>= 1/3 della sprite ancora visibile e
         // sliver minimo toccabile). Nessun altro percorso la porta più fuori.
         val allowed = if (parkedSide != 0) peekOffsetPx(parkedSide) else 0
-        val x = posX.roundToInt().coerceIn(-allowed, maxX + allowed)
-        // In verticale la finestra resta tra il bordo alto e la posizione di
-        // riposo sul pavimento (piedi su floorLineY): la mascotte è sempre
-        // visibile, senza cambiare la fisica del pavimento.
-        val y = posY.roundToInt().coerceIn(0, max(0, floorTopY().toInt().coerceAtLeast(0)))
+        val x = posX.roundToInt().coerceIn(minX - allowed, maxX + allowed)
+        // In verticale la finestra resta tra la zona utile alta (sotto
+        // orologio/notch) e la posizione di riposo sul pavimento (piedi su
+        // floorLineY): la mascotte è sempre visibile, senza cambiare la fisica
+        // del pavimento.
+        val top = usableTop
+        val y = posY.roundToInt().coerceIn(top, max(top, floorTopY().toInt().coerceAtLeast(top)))
         if (lp.x != x || lp.y != y) {
             lp.x = x
             lp.y = y
