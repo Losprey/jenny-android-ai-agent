@@ -528,8 +528,8 @@ class JennyOverlayController(private val context: Context) {
                 val fvx = if (max(abs(vx), abs(vy)) < FLING_MIN_PX_S) 0f else vx
                 val fvy = if (max(abs(vx), abs(vy)) < FLING_MIN_PX_S) 0f else vy
                 if (alreadyOnFloor && abs(fvx) < dp(2) && abs(fvy) < dp(2)) {
-                    // L'utente l'ha solo riposata: resta dov'è e si siede
-                    // (vicino al bordo laterale si parcheggia in peek).
+                    // L'utente l'ha solo riposata: resta dov'è (in ogni caso
+                    // del tutto dentro lo schermo) e si siede.
                     posY = floorTopY()
                     maybeParkAfterSettle()
                     startSit()
@@ -716,23 +716,14 @@ class JennyOverlayController(private val context: Context) {
     }
 
     /** Da chiamare SOLO a riposo (settleFlight o rilascio debole sul pavimento),
-     *  mai in volo: se il bordo sinistro della finestra è entro PARK_BAND_DP dal
-     *  bordo laterale dello schermo la parcheggia quasi fuori schermo; se no la
-     *  lascia dov'è. Il parcheggio guarda solo la x: mai su bordi alto/basso. */
+     *  mai in volo: non parcheggia mai la mascotte (nemmeno in parte) fuori
+     *  schermo. Se dopo il riposo la finestra è finita oltre un bordo laterale
+     *  viene riportata dentro, accostata al bordo e del tutto visibile
+     *  (x in [0, maxX]); altrimenti resta dov'è. */
     private fun maybeParkAfterSettle() {
-        val band = dp(PARK_BAND_DP)
         val maxX = max(0, screenW - sizePx)
-        val side = when {
-            posX <= band -> -1
-            posX >= maxX - band -> 1
-            else -> 0
-        }
-        if (side != 0) {
-            parkToSide(side)
-        } else {
-            parkedSide = 0
-            applyWindow()
-        }
+        posX = posX.coerceIn(0f, maxX.toFloat())
+        applyWindow()
     }
 
     /** Rilascio di un drag partito da parcheggiato: il volo è soppresso. Se la
@@ -824,10 +815,13 @@ class JennyOverlayController(private val context: Context) {
     private fun applyWindow() {
         val lp = petParams ?: return
         val maxX = max(0, screenW - sizePx)
-        // Edge peek-hide: da parcheggiato la finestra può stare quasi tutta fuori
-        // schermo (x negativa o oltre maxX); altrimenti il clamp resta identico.
-        val parkOut = if (parkedSide != 0) peekOffsetPx() else 0
-        val x = posX.roundToInt().coerceIn(-parkOut, maxX + parkOut)
+        // Invariante: la finestra resta sempre del tutto dentro lo schermo in
+        // orizzontale, per ogni movimento (drag, volo, riposo). Niente
+        // parcheggio fuori schermo: x è sempre in [0, maxX].
+        val x = posX.roundToInt().coerceIn(0, maxX)
+        // In verticale la finestra resta tra il bordo alto e la posizione di
+        // riposo sul pavimento (piedi su floorLineY): la mascotte è sempre
+        // visibile, senza cambiare la fisica del pavimento.
         val y = posY.roundToInt().coerceIn(0, max(0, floorTopY().toInt().coerceAtLeast(0)))
         if (lp.x != x || lp.y != y) {
             lp.x = x
