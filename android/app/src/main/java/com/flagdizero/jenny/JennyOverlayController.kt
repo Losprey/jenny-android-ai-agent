@@ -33,6 +33,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.view.WindowInsetsCompat
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -73,6 +74,11 @@ class JennyOverlayController(private val context: Context) {
         private val SIZE_DP_BY_PREF = mapOf("sm" to 120, "md" to 160, "lg" to 210)
         private const val EDGE_MARGIN_DP = 6
         private const val FLOOR_GAP_DP = 12
+        // Batch 7 — margine minimo di sicurezza dal bordo basso: quando ne gli
+        // inset di sistema ne navigation_bar_height sono > 0 (navigazione a
+        // gesture: la pillola non e una barra vera) il pavimento resta comunque
+        // fuori dalla fascia riconosciuta come gesture di home.
+        private const val MIN_SAFE_BOTTOM_DP = 48
 
         private const val HIDE_TARGET_SIZE_DP = 56
         private const val HIDE_TARGET_TOP_DP = 40
@@ -176,6 +182,13 @@ class JennyOverlayController(private val context: Context) {
         // MainActivity in primo piano.
         @Volatile
         var overlayHostForeground = true
+
+        // Ultimo stato "tastiera di sistema visibile" noto (batch 7): seed per
+        // controller nati dopo l'ultimo cambio (l'IME puo essere gia su quando
+        // il service crea l'overlay). Default false: l'overlay nasce dalla
+        // MainActivity senza tastiera a video.
+        @Volatile
+        var overlayImeVisible = false
 
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
@@ -518,22 +531,22 @@ class JennyOverlayController(private val context: Context) {
             newTop = insetsTop.coerceIn(0, h)
             newRight = (w - insetsRight).coerceIn(newLeft, w)
             // Se la barra bassa non arriva come inset (finestra overlay che non
-            // riceve insets) si ripiega sull'altezza storica della risorsa.
-            val bottomInset = if (insetsBottom > 0) insetsBottom else systemNavBarHeightPx()
+            // riceve insets) si ripiega sulla risorsa di sistema, con un minimo
+            // di sicurezza (gesture nav: la pillola non e una barra vera).
+            val bottomInset = if (insetsBottom > 0) insetsBottom else safeBottomInsetPx()
             newBottom = (h - bottomInset).coerceIn(newTop, h)
-            // Pavimento: sopra la barra bassa con il solito piccolo margine; se
-            // nessuna barra bassa è nota si usa il margine storico più ampio.
-            newFloor = if (bottomInset > 0) {
-                (newBottom - dp(FLOOR_GAP_DP)).coerceAtLeast(0)
-            } else {
-                (h - dp(FLOOR_GAP_DP + 16)).coerceAtLeast(0)
-            }
+            // Pavimento: sopra la barra bassa con il solito piccolo margine.
+            // safeBottomInsetPx() garantisce un bordo > 0 anche in gesture nav.
+            newFloor = (newBottom - dp(FLOOR_GAP_DP)).coerceAtLeast(0)
         } else {
-            // Fallback storico (pre-R o insets non ancora consegnati).
-            val navBarPx = systemNavBarHeightPx()
-            // Il pavimento sta sopra barra di navigazione/gesture, con un margine.
-            val bottomGap = if (navBarPx > 0) navBarPx + dp(FLOOR_GAP_DP) else dp(FLOOR_GAP_DP + 16)
-            newFloor = h - bottomGap
+            // Fallback (pre-R o insets non ancora consegnati): barre ricavate
+            // dalle risorse di sistema, con un minimo prudente. Il tetto utile
+            // include status bar/cutout quando noti, cosi la mascotte non ci
+            // vola sotto; il pavimento resta fuori dalla fascia di gesture.
+            newTop = systemStatusBarHeightPx().coerceIn(0, h)
+            val bottomInset = safeBottomInsetPx()
+            newBottom = (h - bottomInset).coerceIn(newTop, h)
+            newFloor = (newBottom - dp(FLOOR_GAP_DP)).coerceAtLeast(0)
         }
 
         val changed = sizeChanged ||
@@ -581,16 +594,32 @@ class JennyOverlayController(private val context: Context) {
     }
 
     /** Salva gli insets consegnati dal WebView e ricalcola la geometria utile.
-     *  Solo su R+: systemBars/displayCutout richiedono API 30/28 e prima di R
-     *  resta in vigore il percorso storico a risorse/metriche. */
-    private fun onWindowInsets(insets: WindowInsets) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        val bars = insets.getInsets(WindowInsets.Type.systemBars())
-        val cutout = insets.displayCutout
-        val l = max(bars.left, cutout?.safeInsetLeft ?: 0)
-        val t = max(bars.top, cutout?.safeInsetTop ?: 0)
-        val r = max(bars.right, cutout?.safeInsetRight ?: 0)
-        val b = max(bars.bottom, cutout?.safeInsetBottom ?: 0)
+     *  Su R+ si leggono direttamente systemBars/displayCutout; sotto R — dove
+     *  quei metodi nativi non esistono — WindowInsetsCompat ricostruisce gli
+     *  stessi valori dagli inset di sistema (API 21+). Se la finestra overlay
+     *  non riceve affatto insets (FLAG_NOT_FOCUSABLE) resta in vigore il
+     *  percorso a risorse/metriche di refreshGeometry. */
+    private fun onWindowInsets(insets: WindowInsets, view: View) {
+        val l: Int
+        val t: Int
+        val r: Int
+        val b: Int
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bars = insets.getInsets(WindowInsets.Type.systemBars())
+            val cutout = insets.displayCutout
+            l = max(bars.left, cutout?.safeInsetLeft ?: 0)
+            t = max(bars.top, cutout?.safeInsetTop ?: 0)
+            r = max(bars.right, cutout?.safeInsetRight ?: 0)
+            b = max(bars.bottom, cutout?.safeInsetBottom ?: 0)
+        } else {
+            val compat = WindowInsetsCompat.toWindowInsetsCompat(insets, view)
+            val bars = compat.getInsets(WindowInsetsCompat.Type.systemBars())
+            val cutout = compat.displayCutout
+            l = max(bars.left, cutout?.safeInsetLeft ?: 0)
+            t = max(bars.top, cutout?.safeInsetTop ?: 0)
+            r = max(bars.right, cutout?.safeInsetRight ?: 0)
+            b = max(bars.bottom, cutout?.safeInsetBottom ?: 0)
+        }
         val changed = !insetsKnown ||
             l != insetsLeft || t != insetsTop || r != insetsRight || b != insetsBottom
         if (!changed) return
@@ -605,6 +634,28 @@ class JennyOverlayController(private val context: Context) {
 
     private fun systemNavBarHeightPx(): Int {
         val id = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id > 0) {
+            try {
+                context.resources.getDimensionPixelSize(id)
+            } catch (_: Exception) {
+                0
+            }
+        } else 0
+    }
+
+    /** Bordo inferiore prudente: l'inset di sistema se noto, altrimenti la
+     *  risorsa navigation_bar_height, e — quando anche quella e 0 (navigazione
+     *  a gesture: la pillola non e una barra vera) — un minimo di sicurezza.
+     *  Cosi il pavimento non finisce mai dentro la fascia di gesture. */
+    private fun safeBottomInsetPx(): Int {
+        val nav = systemNavBarHeightPx()
+        return if (nav > 0) nav else dp(MIN_SAFE_BOTTOM_DP)
+    }
+
+    /** Altezza della status bar dalle risorse di sistema (0 se non leggibile).
+     *  Usata come fallback quando gli insets non arrivano affatto. */
+    private fun systemStatusBarHeightPx(): Int {
+        val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
         return if (id > 0) {
             try {
                 context.resources.getDimensionPixelSize(id)
@@ -777,6 +828,7 @@ class JennyOverlayController(private val context: Context) {
         batch6TickCount = 0
         smartHideMediaActive = false
         smartHidden = false
+        retreatApplied = false
         mood = MOOD_NEUTRAL
         lastMoodEventMs = 0L
         lastMoodPush = -99
@@ -846,10 +898,11 @@ class JennyOverlayController(private val context: Context) {
             settings.mediaPlaybackRequiresUserGesture = false
             setOnLongClickListener { true }
             setOnTouchListener { _, event -> onPetTouch(event) }
-            // Cattura barre di sistema/gesture e notch una volta agganciato
-            // (R+): da lì si ricalcola la geometria "utile" della finestra.
-            setOnApplyWindowInsetsListener { _, insets ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) onWindowInsets(insets)
+            // Cattura barre di sistema/gesture e notch: su R+ dai tipi nativi,
+            // sotto R via WindowInsetsCompat (batch 7). Da lì si ricalcola la
+            // geometria "utile" della finestra.
+            setOnApplyWindowInsetsListener { v, insets ->
+                onWindowInsets(insets, v)
                 insets
             }
             webViewClient = object : WebViewClient() {
@@ -899,6 +952,10 @@ class JennyOverlayController(private val context: Context) {
         loadPage()
         scheduleCuriosity()
         scheduleBatch6Tick()
+        // Batch 7: se una ritirata e gia in corso (smart hide attiva o IME gia
+        // a video quando l'overlay nasce) la mascotte parte gia ritirata.
+        retreatApplied = false
+        syncRetreatState()
     }
 
     private fun loadPage() {
@@ -1129,6 +1186,13 @@ class JennyOverlayController(private val context: Context) {
     // e ritirata da sola (WebView GONE + finestra non toccabile).
     private var smartHideMediaActive = false
     private var smartHidden = false
+
+    // Batch 7 — ritirata unificata: `smartHidden` (smart hide) e
+    // `overlayImeVisible` (tastiera a video) sono cause indipendenti; questo
+    // flag rispecchia cio che e applicato alla view, cosi le due cause non si
+    // annullano a vicenda (prima setHostForeground(true) cancellava anche una
+    // ritirata da IME). `retreatApplied` e l'unico stato possibile della view.
+    private var retreatApplied = false
 
     @SuppressLint("ClickableViewAccessibility")
     private fun onPetTouch(event: MotionEvent): Boolean {
@@ -1792,7 +1856,10 @@ class JennyOverlayController(private val context: Context) {
         overlayPrefs().edit().putBoolean(PREFS_SMART_HIDE, on).apply()
         val mirror = if (on) "1" else "0"
         evalJs("try{localStorage.setItem('jenny-mascotte-smarthide', '$mirror');}catch(e){}")
-        if (!on) restoreFromSmartHide()
+        if (!on) {
+            smartHidden = false
+            syncRetreatState()
+        }
     }
 
     private fun poke() {
@@ -2128,7 +2195,8 @@ class JennyOverlayController(private val context: Context) {
         } else if (!mediaOn && smartHideMediaActive) {
             smartHideMediaActive = false
             Log.i(TAG, "smart hide: media finito — mascotte di nuovo visibile")
-            restoreFromSmartHide()
+            smartHidden = false
+            syncRetreatState()
             return
         }
         if (smartHideMediaActive && !smartHidden && phase == Phase.IDLE &&
@@ -2137,38 +2205,42 @@ class JennyOverlayController(private val context: Context) {
         ) {
             val quiet = System.currentTimeMillis() - lastInteractionMs
             if (lastInteractionMs != 0L && quiet < SMART_HIDE_QUIET_MS) return
-            applySmartHide()
+            smartHidden = true
+            syncRetreatState()
         }
     }
 
-    /** Ritirata automatica: la WebView diventa invisibile e la finestra lascia
-     *  passare i tocchi (FLAG_NOT_TOUCHABLE). Niente teardown ne preferenza
-     *  "hidden" persistente: quando l'audio smette (o l'app host torna in
-     *  primo piano) la mascotte riappare senza ricaricare nulla. */
-    private fun applySmartHide() {
+    /** Ritirata unificata (batch 7): la mascotte si ritira quando la smart
+     *  hide la vuole ritirata (`smartHidden`) **oppure** quando la tastiera di
+     *  sistema e a video (`overlayImeVisible`, spinta dalla MainActivity). Le
+     *  due cause sono indipendenti: alzare l'app host non annulla piu una
+     *  ritirata da IME, e viceversa.
+     *
+     *  Un solo stato della view, `retreatApplied`, tiene traccia di cio che e
+     *  applicato: WebView GONE + finestra non toccabile (FLAG_NOT_TOUCHABLE).
+     *  Niente teardown ne preferenza "hidden" persistente: quando entrambe le
+     *  cause cadono la mascotte riappare senza ricaricare nulla, e il ritorno
+     *  a riposo avviene solo su una vera transizione (non a ogni chiamata). */
+    private fun syncRetreatState() {
         val view = petView ?: return
         val lp = petParams ?: return
-        stopGlide()
-        settleRunnable?.let { mainHandler.removeCallbacks(it) }
-        settleRunnable = null
-        cancelPendingPoke()
-        smartHidden = true
-        view.visibility = View.GONE
-        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        val hidden = smartHidden || overlayImeVisible
+        if (hidden == retreatApplied) return
+        val wasHidden = retreatApplied
+        retreatApplied = hidden
+        if (hidden) {
+            stopGlide()
+            settleRunnable?.let { mainHandler.removeCallbacks(it) }
+            settleRunnable = null
+            cancelPendingPoke()
+            view.visibility = View.GONE
+            lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        } else {
+            view.visibility = View.VISIBLE
+            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        }
         runCatching { wm.updateViewLayout(view, lp) }
-    }
-
-    /** Annulla una ritirata automatica (audio finito, opzione spenta o app
-     *  host di nuovo in primo piano). */
-    private fun restoreFromSmartHide() {
-        if (!smartHidden) return
-        smartHidden = false
-        val view = petView ?: return
-        val lp = petParams ?: return
-        view.visibility = View.VISIBLE
-        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        runCatching { wm.updateViewLayout(view, lp) }
-        if (phase == Phase.IDLE) {
+        if (!hidden && wasHidden && phase == Phase.IDLE) {
             startSit()
             scheduleCuriosity()
         }
@@ -2176,12 +2248,28 @@ class JennyOverlayController(private val context: Context) {
 
     /** L'app host e passata in primo piano / in background. In primo piano la
      *  mascotte non si ritira (l'utente sta usando Jenny, magari con la
-     *  musica in sottofondo) e un'eventuale ritirata automatica si annulla.
-     *  Il valore vive nel companion: onResume puo correre prima che il
-     *  controller esista (il service crea l'overlay dopo). */
+     *  musica in sottofondo) e un'eventuale ritirata della smart hide si
+     *  annulla. Il valore vive nel companion: onResume puo correre prima che
+     *  il controller esista (il service crea l'overlay dopo). */
     fun setHostForeground(foreground: Boolean) {
         overlayHostForeground = foreground
-        if (foreground && petView != null) restoreFromSmartHide()
+        if (foreground && petView != null) {
+            // Batch 7: si annulla solo la ritirata della smart hide; una
+            // ritirata dovuta alla tastiera (overlayImeVisible) resta valida.
+            smartHidden = false
+            syncRetreatState()
+        }
+    }
+
+    /** La tastiera di sistema (IME) e visibile. Stesso schema di
+     *  setHostForeground: il valore vive nel companion, cosi un controller nato
+     *  mentre l'IME e gia su parte gia ritirato. La mascotte si ritira durante
+     *  la digitazione (non deve coprire tasti ne barra di composizione) e torna
+     *  quando l'IME sparisce; la MainActivity lo riporta a false anche in
+     *  onPause. */
+    fun setImeVisible(visible: Boolean) {
+        overlayImeVisible = visible
+        syncRetreatState()
     }
 
     // ------------------------------------------------------------- curiosità

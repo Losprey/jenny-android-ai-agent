@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -535,6 +536,11 @@ class MainActivity : AppCompatActivity() {
     @Volatile
     private var bottomGestureInsetPx: Int = 0
 
+    // Batch 7 — ultimo stato IME (tastiera a video) noto, cosi non si rimanda
+    // al controller lo stesso valore a ogni dispatch. Solo thread UI.
+    @Volatile
+    private var imeVisible: Boolean = false
+
     /**
      * Ricalcola [bottomGestureInsetPx] e, se è cambiato, lo annuncia alla SPA.
      * **Solo dal thread UI**: legge la geometria delle view.
@@ -578,11 +584,49 @@ class MainActivity : AppCompatActivity() {
     private fun observeGestureInsets(wv: WebView) {
         ViewCompat.setOnApplyWindowInsetsListener(wv) { v, insets ->
             refreshGestureInsets()
+            refreshImeVisibility()
             // Si osserva soltanto: la gestione di default della view resta la
             // sua. Restituire `insets` e basta la salterebbe.
             ViewCompat.onApplyWindowInsets(v, insets)
         }
-        wv.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> refreshGestureInsets() }
+        wv.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            refreshGestureInsets()
+            refreshImeVisibility()
+        }
+    }
+
+    /**
+     * Rileva la tastiera di sistema e la annuncia al controller overlay
+     * (batch 7): mentre l'utente digita la mascotte si ritira, cosi non copre
+     * i tasti ne la barra di composizione. Da R in poi si legge direttamente
+     * dagli inset ([WindowInsetsCompat.Type.ime]); prima — dove
+     * isVisible(ime()) non e affidabile — si confronta la finestra visibile
+     * con l'altezza del decor. Stesso schema dell'host: il valore lo porta il
+     * controller anche ai controller nati dopo.
+     */
+    private fun refreshImeVisibility() {
+        val visible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val insets = ViewCompat.getRootWindowInsets(window.decorView)
+            insets != null &&
+                insets.isVisible(WindowInsetsCompat.Type.ime()) &&
+                insets.getInsets(WindowInsetsCompat.Type.ime()).bottom > 0
+        } else {
+            imeVisibleByFrame()
+        }
+        if (visible == imeVisible) return
+        imeVisible = visible
+        JennyOverlayController.live?.setImeVisible(visible)
+    }
+
+    /** Euristica pre-R: `isVisible(ime())` non e affidabile sotto API 30,
+     *  quindi si misura quanto della decor view resta coperto in basso; oltre
+     *  un quarto dell'altezza e la tastiera (non la barra di navigazione). */
+    private fun imeVisibleByFrame(): Boolean {
+        val decor = window.decorView
+        if (decor.height == 0) return false
+        val visible = Rect()
+        decor.getWindowVisibleDisplayFrame(visible)
+        return (decor.height - visible.bottom) > decor.height / 4
     }
 
     /**
@@ -662,6 +706,11 @@ class MainActivity : AppCompatActivity() {
         // davanti). Il flag vive nel controller ed è condiviso anche con
         // i controller nati dopo questo onPause/onResume.
         JennyOverlayController.live?.setHostForeground(false)
+        // Batch 7: la tastiera non e piu davanti — la mascotte torna subito
+        // disponibile e un eventuale ritiro da IME si annulla; al ritorno il
+        // primo dispatch di insets rimette lo stato vero.
+        imeVisible = false
+        JennyOverlayController.live?.setImeVisible(false)
     }
 
     override fun onResume() {
