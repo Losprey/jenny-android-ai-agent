@@ -103,6 +103,21 @@ class JennyOverlayController(private val context: Context) {
         private const val MENU_AUTO_DISMISS_MS = 6000L
         private const val MENU_CORNER_RADIUS_DP = 18
 
+        /**
+         * Batch 9 — slovacco: unico posto per le stringhe visibili del menu
+         * rapido. Il pet parla slovacco a prescindere dalla lingua della SPA
+         * (che ha solo en/it), quindi niente risorse/i18n Android: si cambia qui.
+         */
+        private object MenuStrings {
+            const val SMALL = "Malá"
+            const val MEDIUM = "Stredná"
+            const val LARGE = "Veľká"
+            const val COLOR = "Farba"
+            const val SLEEP = "Spi"
+            const val HIDE = "Skryť"
+            const val OPEN_CHAT = "Otvoriť chat"
+        }
+
         // Micro-movimenti autonomi (curiosità): rari, lenti, solo a riposo.
         private const val CURIOUS_MIN_MS = 60_000L
         private const val CURIOUS_MAX_MS = 150_000L
@@ -2021,15 +2036,15 @@ class JennyOverlayController(private val context: Context) {
             rows.addView(tv)
         }
 
-        addRow("Piccola", curSize == "sm") { chooseSize("sm") }
-        addRow("Media", curSize == "md") { chooseSize("md") }
-        addRow("Grande", curSize == "lg") { chooseSize("lg") }
-        addRow("Colore", curColor) { chooseColor(!curColor) }
-        addRow("Dormi", null) {
+        addRow(MenuStrings.SMALL, curSize == "sm") { chooseSize("sm") }
+        addRow(MenuStrings.MEDIUM, curSize == "md") { chooseSize("md") }
+        addRow(MenuStrings.LARGE, curSize == "lg") { chooseSize("lg") }
+        addRow(MenuStrings.COLOR, curColor) { chooseColor(!curColor) }
+        addRow(MenuStrings.SLEEP, null) {
             evalJs("window.__jennySleep && window.__jennySleep();")
         }
-        addRow("Nascondi", null) { hide() }
-        addRow("Apri la chat", null) { openMainApp() }
+        addRow(MenuStrings.HIDE, null) { hide() }
+        addRow(MenuStrings.OPEN_CHAT, null) { openMainApp() }
 
         val rowCount = 7
         val menuH = rowCount * rowH + pad * 2

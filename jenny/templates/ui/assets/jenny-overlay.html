@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="sk">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
@@ -736,7 +736,7 @@
     if (sleeping && prefs.sleep) doWake();
     if (sleeping) return;
     if (activePose !== 'idle') return;
-    showBubble(randomLine(['In carica!', 'Energia!']), 2200);
+    showBubble(randomLine(['Nabíjam sa!', 'Energia!']), 2200);
     clearMicro();
     seqStep(0, function () { motionSet(0, -12, 0, 1, 200, 'ease-out'); });
     seqStep(240, function () {
@@ -753,7 +753,7 @@
   function onLowBatteryTired() {
     if (sleeping || !prefs.sleep || !prefs.idle) return;
     if (activePose !== 'idle' || document.hidden) return;
-    showBubble(randomLine(['Che sonno…', 'Batteria giù…']), 2400);
+    showBubble(randomLine(['Som ospalá…', 'Batéria slábne…']), 2400);
     setTimeout(function () {
       if (sleeping || document.hidden) return;
       if (activePose !== 'idle') return;
@@ -772,10 +772,10 @@
     var today = dayKey();
     if (h >= 6 && h < 10 && greetedDayKey !== today) {
       greetedDayKey = today;
-      showBubble(randomLine(['Buongiorno!', 'Mmm, buongiorno…']), 2200);
+      showBubble(randomLine(['Dobré ráno!', 'Mmm, dobré ráno…']), 2200);
     } else if (h >= 20 && h < 23 && yawnedDayKey !== today) {
       yawnedDayKey = today;
-      showBubble(randomLine(['Che sonno…', 'Sbadiglio…']), 2200);
+      showBubble(randomLine(['Som ospalá…', 'Zívam…']), 2200);
     }
   }
 
@@ -838,10 +838,10 @@
 
   /* ---- 5) Frasi ambientali opzionali (brevissime, lingua del file) ---- */
   var AMBIENT_LINES = {
-    night:   ['Buona notte!', 'Notte, notte.'],
-    morning: ['Buongiorno!', 'Ciao! Buona giornata.', 'Ehi, buongiorno!'],
-    day:     ['Ciao!', 'Tutto bene?', 'Eccomi qui!', 'Un saluto da Jenny.'],
-    evening: ['Buonasera!', 'Ciao, serata!', 'Serata, come va?']
+    night:   ['Dobrú noc!', 'Noc, noc.'],
+    morning: ['Dobré ráno!', 'Čauko! Pekný deň.', 'Hej, dobré ráno!'],
+    day:     ['Čauko!', 'Všetko v pohode?', 'Tu som!', 'Pozdrav od Jenny.'],
+    evening: ['Dobrý večer!', 'Čau, večer!', 'Večer, ako ide?']
   };
   function greetingForHour() {
     var h = new Date().getHours();
