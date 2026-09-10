@@ -190,6 +190,15 @@ class JennyOverlayController(private val context: Context) {
         @Volatile
         var overlayImeVisible = false
 
+        // Saluto in sospeso (batch 8): seed per il caso in cui onResume chiami
+        // cheerUp() (startForegroundService e asincrono) prima che il service
+        // abbia creato l'overlay. Il controller nato nel frattempo lo consuma
+        // appena la sua pagina e pronta, cosi il balzo di saluto non si perde.
+        // Stesso schema di overlayHostForeground. Default false: nessun saluto
+        // in attesa.
+        @Volatile
+        var overlayPendingCheer = false
+
         private const val GRAVITY_PX_S2 = 2500f
         private const val MAX_FALL_SPEED_PX_S = 3600f
         private const val FLOOR_RESTITUTION = 0.36f
@@ -392,7 +401,9 @@ class JennyOverlayController(private val context: Context) {
         val sh = smartHide
         mainHandler.post {
             if (petView == null) return@post
-            if (s != null && s in SIZE_DP_BY_PREF) chooseSize(s)
+            // Batch 8 — dimensione scelta dalle Impostazioni della SPA: nessuna
+            // vibrazione, il dito e nella pagina, non sulla mascotte.
+            if (s != null && s in SIZE_DP_BY_PREF) chooseSize(s, vibrate = false)
             if (c != null) chooseColor(c)
             if (h != null) chooseHaptics(h)
             if (a != null) chooseAutoPark(a)
@@ -927,6 +938,11 @@ class JennyOverlayController(private val context: Context) {
                     pushBatteryToPage()
                     maybePushMood()
                     pollArtAndPrefs()
+                    // Batch 8 — saluto rimasto in sospeso (onResume ha chiesto
+                    // cheerUp prima che questo controller esistesse): si tenta
+                    // ora che la pagina e pronta, cosi il balzo si vede; se non
+                    // e il momento il seme resta e verra ritentato.
+                    if (overlayPendingCheer) cheerUp()
                 }
             }
         }
@@ -1193,6 +1209,11 @@ class JennyOverlayController(private val context: Context) {
     // annullano a vicenda (prima setHostForeground(true) cancellava anche una
     // ritirata da IME). `retreatApplied` e l'unico stato possibile della view.
     private var retreatApplied = false
+
+    /** Batch 8 — "nascosta per qualunque causa": la stessa ritirata unificata
+     *  qui sopra (smart hide *oppure* IME). Un solo predicato per i percorsi di
+     *  interazione, cosi non se ne dimentica una delle due cause. */
+    private fun isRetreated(): Boolean = retreatApplied
 
     @SuppressLint("ClickableViewAccessibility")
     private fun onPetTouch(event: MotionEvent): Boolean {
@@ -1762,6 +1783,18 @@ class JennyOverlayController(private val context: Context) {
         val now = System.currentTimeMillis()
         if (now - lastCheerAtMs < CHEER_MIN_INTERVAL_MS) return
         if (lastInteractionMs != 0L && now - lastInteractionMs < CHEER_MIN_QUIET_MS) return
+        // Batch 8 — superati i controlli il saluto parte (o almeno tocca
+        // l'umore): il seme lasciato da onResume non e piu pendente.
+        overlayPendingCheer = false
+        // Batch 8 — ritirata (smart hide o IME): niente posa ne ritorno
+        // programmato su una view GONE, che non si vedrebbe. L'umore pero e
+        // stato, non pittura: l'evento e reale (host tornato in primo piano) e
+        // si aggiorna comunque, cosi la mascotte riappare gia contenta.
+        if (isRetreated()) {
+            lastCheerAtMs = now
+            raiseMood(MOOD_HAPPY)
+            return
+        }
         val view = petView ?: return
         view.evaluateJavascript("window.__jennySleeping ? window.__jennySleeping() : false") { raw ->
             if (petView == null || petParams == null) return@evaluateJavascript
@@ -1865,6 +1898,11 @@ class JennyOverlayController(private val context: Context) {
     private fun poke() {
         if (petView == null || phase != Phase.IDLE) return
         if (touchActive || dragCommitted) return
+        // Batch 8 — ritirata (smart hide o IME): la mascotte e GONE, il
+        // brindisi resterebbe invisibile. Nessun effetto e nessun ritorno
+        // programmato (il tocco in teoria non arriva, ma la corsa con il
+        // ritiro dell'IME e reale).
+        if (isRetreated()) return
         raiseMood(MOOD_HAPPY)
         vibrate(VIBRATE_POKE_MS)
         val pose = POKE_POSES[(Math.random() * POKE_POSES.size).toInt()]
@@ -2012,16 +2050,20 @@ class JennyOverlayController(private val context: Context) {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             // Sopra la mascotte, centrato sulla finestra; se non c'è spazio
-            // sotto. Sempre dentro lo schermo.
+            // sotto. Batch 8 — sempre dentro la zona UTILE, non solo dentro lo
+            // schermo: in landscape o con un cutout laterale il menu non può
+            // finire sotto la status bar, la nav bar o dietro un ritaglio.
             var mx = lp.x + (sizePx - menuW) / 2
-            mx = mx.coerceAtLeast(dp(MENU_PAD_DP))
-                .coerceAtMost(max(dp(MENU_PAD_DP), screenW - menuW - dp(MENU_PAD_DP)))
+            val minMx = usableLeft + dp(MENU_PAD_DP)
+            mx = mx.coerceAtLeast(minMx)
+                .coerceAtMost(max(minMx, usableRight - menuW - dp(MENU_PAD_DP)))
             var my = lp.y - menuH - dp(MENU_GAP_DP)
             if (my < usableTop + dp(MENU_GAP_DP)) {
                 my = lp.y + sizePx + dp(MENU_GAP_DP)
             }
-            my = my.coerceAtLeast(dp(MENU_PAD_DP))
-                .coerceAtMost(max(dp(MENU_PAD_DP), screenH - menuH - dp(MENU_PAD_DP)))
+            val minMy = usableTop + dp(MENU_PAD_DP)
+            my = my.coerceAtLeast(minMy)
+                .coerceAtMost(max(minMy, usableBottom - menuH - dp(MENU_PAD_DP)))
             x = mx
             y = my
         }
@@ -2053,9 +2095,12 @@ class JennyOverlayController(private val context: Context) {
      *  della pagina (stessa chiave della SPA letta dal poll di batch-1).
      *  resizeTo riclampa nella zona utile, rimette sul pavimento, riapplica il
      *  peek se parcheggiata e aggiorna la finestra. */
-    private fun chooseSize(pref: String) {
-        // Haptics "cambio dimensione" solo se la dimensione cambia davvero.
-        if (pref != readSizePref()) vibrate(VIBRATE_SIZE_MS)
+    private fun chooseSize(pref: String, vibrate: Boolean = true) {
+        // Haptics "cambio dimensione" solo se la dimensione cambia davvero e
+        // solo se il gesto e nato sulla mascotte: la SPA Impostazioni (batch 8)
+        // passa vibrate=false. `this.` e necessario: il parametro omonimo
+        // nasconde il metodo vibrate(...) dentro questa funzione.
+        if (vibrate && pref != readSizePref()) this.vibrate(VIBRATE_SIZE_MS)
         overlayPrefs().edit().putString(PREFS_SIZE, pref).apply()
         evalJs("try{localStorage.setItem('jenny-mascotte-size', '$pref');}catch(e){}")
         val newPx = dp(SIZE_DP_BY_PREF[pref] ?: DEFAULT_SIZE_DP)
@@ -2295,6 +2340,9 @@ class JennyOverlayController(private val context: Context) {
     private fun maybeCuriousMove() {
         val view = petView ?: return
         if (petParams == null) { scheduleCuriosity(); return }
+        // Batch 8 — ritirata (smart hide o IME): niente giretti invisibili; il
+        // timer resta vivo e riprova quando la mascotte torna visibile.
+        if (isRetreated()) { scheduleCuriosity(); return }
         if (phase != Phase.IDLE || settleRunnable != null || dragCommitted || touchActive) {
             scheduleCuriosity()
             return
@@ -2538,7 +2586,9 @@ class JennyOverlayController(private val context: Context) {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = (screenW - size) / 2
-            y = dp(HIDE_TARGET_TOP_DP)
+            // Batch 8 — ancorato SOTTO la zona utile alta: con un notch/cutout
+            // piu alto la ✕ non finisce sotto il ritaglio (intoccabile).
+            y = usableTop + dp(HIDE_TARGET_TOP_DP)
         }
         runCatching { wm.addView(tv, targetLp) }
         targetView = tv
@@ -2552,7 +2602,8 @@ class JennyOverlayController(private val context: Context) {
         if (targetView == null) return false
         val size = dp(HIDE_TARGET_SIZE_DP)
         val left = (screenW - size) / 2
-        val top = dp(HIDE_TARGET_TOP_DP)
+        // Batch 8 — stessa ancora di showHideTarget(), cosi il tocco combacia.
+        val top = usableTop + dp(HIDE_TARGET_TOP_DP)
         val extra = dp(HIDE_HIT_EXTRA_DP)
         val inTarget = rawX >= left - extra && rawX <= left + size + extra &&
             rawY >= top - extra && rawY <= top + size + extra

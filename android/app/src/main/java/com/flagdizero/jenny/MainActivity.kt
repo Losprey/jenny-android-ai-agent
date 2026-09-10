@@ -754,7 +754,17 @@ class MainActivity : AppCompatActivity() {
                 // fuori scope). Il controller decide da solo se il saluto è
                 // appropriato: a riposo, pagina sveglia e non più di una volta
                 // ogni CHEER_MIN_INTERVAL_MS.
-                JennyOverlayController.live?.cheerUp()
+                // Batch 8: `live` può essere ancora null — startForegroundService
+                // è asincrono e il service crea l'overlay dopo. In quel caso il
+                // saluto non si perde: si lascia un seme nel companion, che il
+                // controller nato nel frattempo consuma appena la sua pagina è
+                // pronta (stesso schema di overlayHostForeground qui sotto).
+                val live = JennyOverlayController.live
+                if (live != null) {
+                    live.cheerUp()
+                } else {
+                    JennyOverlayController.overlayPendingCheer = true
+                }
                 // Batch 6: in primo piano la mascotte non fa ritirate
                 // smart (l'utente sta usando Jenny, magari con la musica
                 // in sottofondo) e un'eventuale ritirata automatica si
